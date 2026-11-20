@@ -16,6 +16,8 @@
 //!   with focal search at both levels.
 //! - [`icts`]: increasing cost tree search with pairwise pruning, optimal for sum of
 //!   costs.
+//! - [`mstar`]: M* (subdimensional expansion), optimal for sum of costs, and able to prove
+//!   unsolvability.
 //! - [`pbs()`]: priority-based search, fast but neither optimal nor complete.
 //! - [`space_time_astar`]: the single-agent low level under [`Constraint`]s, built on the
 //!   `heuristic-search` crate's A*.
@@ -53,7 +55,6 @@
 //!
 //! - Conflict-based: CBS-TA, and more CBS improvements (DG/WDG heuristics,
 //!   disjoint splitting)
-//! - Subdimensional: M*
 //! - Local repair: MAPF-LNS2
 //! - Partial expansion: EPEA*
 //!
@@ -81,6 +82,7 @@ mod instance;
 mod low_level;
 mod mdd;
 mod movingai;
+mod mstar;
 mod path;
 mod pbs;
 mod solution;
@@ -98,6 +100,7 @@ pub use movingai::{
     ParseError, ParseErrorKind, ScenarioEntry, ScenarioError, parse_map, parse_scenario,
     scenario_instance,
 };
+pub use mstar::mstar;
 pub use path::{Objective, Path, Time, makespan, path_cost, position_at, sum_of_costs};
 pub use pbs::pbs;
 pub use solution::{MapfResult, Outcome, Solution};

@@ -153,6 +153,12 @@ proptest! {
         check(&grid, &agents, Solver::Icts)?;
     }
 
+    /// M* agrees with the oracle.
+    #[test]
+    fn mstar_matches_joint_search((grid, agents) in instance()) {
+        check(&grid, &agents, Solver::MStar)?;
+    }
+
     /// PBS plans are valid and no cheaper than the optimum; PBS may give up.
     #[test]
     fn pbs_plans_are_valid((grid, agents) in instance()) {
