@@ -282,3 +282,58 @@ fn recursive_mstar_plans_independent_pairs_apart() {
         );
     }
 }
+
+/// The benchmark's instance (`benches/solvers.rs`): eight agents crossing an 8x8 map with
+/// a few walls. Optimal sum of costs 92.
+pub fn benchmark_instance() -> Instance<Grid> {
+    let grid = Grid::parse(&[
+        "........", "..@@....", "......@.", ".@......", "....@...", "..@.....", "......@.",
+        "........",
+    ]);
+    let at = |(sx, sy), (gx, gy)| Agent {
+        start: grid.vertex(sx, sy),
+        goal: grid.vertex(gx, gy),
+    };
+    let agents = vec![
+        at((0, 0), (7, 7)),
+        at((7, 0), (0, 7)),
+        at((0, 7), (7, 0)),
+        at((7, 7), (0, 0)),
+        at((3, 0), (3, 7)),
+        at((0, 4), (7, 4)),
+        at((7, 3), (0, 3)),
+        at((4, 7), (4, 0)),
+    ];
+
+    Instance::new(grid, agents).expect("valid")
+}
+
+/// The conflict avoidance table cuts plain CBS's expansions on the benchmark instance, for
+/// both objectives, without changing the optimum.
+#[test]
+fn conflict_avoidance_reduces_expansions() {
+    let instance = benchmark_instance();
+    for objective in [Objective::SumOfCosts, Objective::Makespan] {
+        let plain = CbsConfig::plain(objective);
+        let avoiding = CbsConfig {
+            conflict_avoidance: true,
+            ..plain
+        };
+
+        let without = cbs_with(&instance, plain, Limits::NONE);
+        let with = cbs_with(&instance, avoiding, Limits::NONE);
+        let cost = |result: &mapf_search::MapfResult| {
+            let solution = result.solution().expect("solvable");
+            assert_valid_plan(instance.graph(), instance.agents(), &solution.paths);
+            solution.cost(objective)
+        };
+
+        assert_eq!(cost(&with), cost(&without), "{objective:?}");
+        assert!(
+            with.stats.expanded < without.stats.expanded,
+            "{objective:?}: {:?} vs {:?}",
+            with.stats,
+            without.stats
+        );
+    }
+}

@@ -1,6 +1,7 @@
 //! Conflict-based search ([`cbs`], Sharon et al. 2015): optimal for sum of costs or for
-//! makespan ([`Objective`]), with the ICBS improvements (Boyarski et al. 2015) and the CG
-//! heuristic (Felner et al. 2018), each switchable in [`CbsConfig`].
+//! makespan ([`Objective`]), with the ICBS improvements (Boyarski et al. 2015), the CG
+//! heuristic (Felner et al. 2018) and a conflict avoidance table (Sharon et al. 2015), each
+//! switchable in [`CbsConfig`].
 //!
 //! The high level is a best-first search over a constraint tree. Each node holds
 //! constraints and one path per agent that is optimal under them; the node with the lowest
@@ -36,10 +37,11 @@ use heuristic_search::{Budget, Stats};
 
 use self::cardinal::{Cardinality, cardinality, vertex_cover_bound};
 use crate::conflict::{Conflict, conflicts};
+use crate::conflict_table::ConflictTable;
 use crate::constraint::{Constraint, ConstraintSet};
 use crate::graph::{Graph, Vertex};
 use crate::instance::{AgentId, Instance};
-use crate::low_level::{distance_tables, plan};
+use crate::low_level::{distance_tables, plan, plan_avoiding};
 use crate::mdd::Mdd;
 use crate::path::{Objective, Path, makespan, path_cost, sum_of_costs};
 use crate::solution::{MapfResult, Outcome, Solution};
@@ -58,11 +60,13 @@ pub struct CbsConfig {
     /// Bypass (Boyarski et al. 2015): when a child is as cheap for its replanned agent as
     /// the parent and has fewer conflicts, take over its paths instead of splitting.
     pub bypass: bool,
-    /// The CG heuristic: a lower bound on the minimum vertex cover of the graph of agents
-    /// with cardinal conflicts. Admissible for [`Objective::SumOfCosts`] only; ignored for
-    /// [`Objective::Makespan`]. Needs the same MDDs as
-    /// [`prioritize_conflicts`](Self::prioritize_conflicts).
-    pub cardinal_heuristic: bool,
+    /// The admissible high-level heuristic added to a node's sum of costs. Admissible for
+    /// [`Objective::SumOfCosts`] only; ignored for [`Objective::Makespan`].
+    pub heuristic: CbsHeuristic,
+    /// The conflict avoidance table (Sharon et al. 2015): among an agent's cheapest paths,
+    /// the low level returns one with the fewest conflicts with the other agents' current
+    /// paths. The root plans the agents one after another, each avoiding the earlier ones.
+    pub conflict_avoidance: bool,
 }
 
 impl CbsConfig {
@@ -73,7 +77,8 @@ impl CbsConfig {
             objective,
             prioritize_conflicts: false,
             bypass: false,
-            cardinal_heuristic: false,
+            heuristic: CbsHeuristic::None,
+            conflict_avoidance: false,
         }
     }
 
@@ -84,7 +89,8 @@ impl CbsConfig {
             objective,
             prioritize_conflicts: true,
             bypass: true,
-            cardinal_heuristic: true,
+            heuristic: CbsHeuristic::Cg,
+            conflict_avoidance: true,
         }
     }
 
@@ -93,10 +99,32 @@ impl CbsConfig {
         self.prioritize_conflicts || self.uses_heuristic()
     }
 
-    /// Returns `true` if the CG heuristic is on and admissible for the objective.
-    fn uses_heuristic(self) -> bool {
-        self.cardinal_heuristic && self.objective == Objective::SumOfCosts
+    /// The heuristic in use: [`CbsConfig::heuristic`] for sum of costs, none for makespan.
+    fn effective_heuristic(self) -> CbsHeuristic {
+        match self.objective {
+            Objective::SumOfCosts => self.heuristic,
+            Objective::Makespan => CbsHeuristic::None,
+        }
     }
+
+    /// Returns `true` if a heuristic is on and admissible for the objective.
+    fn uses_heuristic(self) -> bool {
+        self.effective_heuristic() != CbsHeuristic::None
+    }
+}
+
+/// An admissible estimate of how much the sum of costs of a constraint-tree node must still
+/// rise ([`CbsConfig::heuristic`]).
+///
+/// Each one needs the MDDs of the node's conflicting agents.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum CbsHeuristic {
+    /// No heuristic: nodes are ordered by their sum of costs.
+    #[default]
+    None,
+    /// CG (Felner et al. 2018): a lower bound on the minimum vertex cover of the graph of
+    /// agents with cardinal conflicts.
+    Cg,
 }
 
 /// Finds a conflict-free plan that is optimal for `objective` with conflict-based search,
@@ -275,12 +303,16 @@ impl<'a, G: Graph> Search<'a, G> {
         Outcome::Unsolvable
     }
 
-    /// The root node: every agent planned alone. `None` if one of them has no path.
+    /// The root node: every agent planned without constraints, avoiding the earlier
+    /// agents' paths if [`CbsConfig::conflict_avoidance`] is on. `None` if one of them has
+    /// no path.
     fn root(&self) -> Option<Node> {
         let agents = self.instance.agents().len();
-        let paths = (0..agents)
-            .map(|agent| self.replan(agent, &[]))
-            .collect::<Option<Vec<_>>>()?;
+        let mut paths = Vec::with_capacity(agents);
+        for agent in 0..agents {
+            let path = self.replan(agent, &[], &paths)?;
+            paths.push(path);
+        }
 
         Some(self.node(Vec::new(), paths, vec![None; agents]))
     }
@@ -327,7 +359,7 @@ impl<'a, G: Graph> Search<'a, G> {
         constraints.push(constraint);
 
         let agent = constraint.agent();
-        let path = self.replan(agent, &constraints)?;
+        let path = self.replan(agent, &constraints, &parent.paths)?;
         let mut paths = parent.paths.clone();
         paths[agent] = path;
         let mut mdds = parent.mdds.clone();
@@ -336,16 +368,20 @@ impl<'a, G: Graph> Search<'a, G> {
         Some(self.node(constraints, paths, mdds))
     }
 
-    /// The cheapest path of `agent` under those of `constraints` that name it.
-    fn replan(&self, agent: AgentId, constraints: &[Constraint]) -> Option<Path> {
+    /// The cheapest path of `agent` under those of `constraints` that name it; with
+    /// [`CbsConfig::conflict_avoidance`], one with the fewest conflicts with `paths`
+    /// (indexed by agent; may be a prefix, and may include `agent`) among the cheapest.
+    fn replan(&self, agent: AgentId, constraints: &[Constraint], paths: &[Path]) -> Option<Path> {
         let set = ConstraintSet::for_agent(agent, constraints);
+        let (graph, distances) = (self.instance.graph(), &self.distances[agent]);
+        let start_and_goal = self.instance.agents()[agent];
 
-        plan(
-            self.instance.graph(),
-            self.instance.agents()[agent],
-            &set,
-            &self.distances[agent],
-        )
+        if self.config.conflict_avoidance {
+            let table = ConflictTable::without(paths, agent);
+            plan_avoiding(graph, start_and_goal, &set, distances, &table)
+        } else {
+            plan(graph, start_and_goal, &set, distances)
+        }
     }
 
     /// A node with `constraints`, `paths` and the known `mdds`: computes its costs, its

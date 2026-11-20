@@ -3,8 +3,9 @@
 //!
 //! CBS uses it to break ties among an agent's cheapest paths (Sharon et al. 2015), ECBS as
 //! the focal key of its low level (Barer et al. 2014). Both count with goal-stay
-//! semantics: an agent sitting at its goal blocks it for good, and an agent that finishes
-//! at its goal conflicts with everyone who passes there later ([`ConflictTable::after`]).
+//! semantics: an agent sitting at its goal blocks it for good. ECBS also counts that an
+//! agent that finishes at its goal conflicts with everyone who passes there later
+//! ([`ConflictTable::after`]).
 
 use alloc::collections::BTreeMap;
 

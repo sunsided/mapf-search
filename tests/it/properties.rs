@@ -3,8 +3,8 @@
 //! conflict-free and within its guarantee over the optimal sum of costs or makespan.
 
 use mapf_search::{
-    Agent, CbsConfig, Grid, Instance, MStarConfig, Objective, Outcome, Vertex, Weight,
-    first_conflict,
+    Agent, CbsConfig, CbsHeuristic, Grid, Instance, MStarConfig, Objective, Outcome, Vertex,
+    Weight, first_conflict,
 };
 use proptest::prelude::*;
 
@@ -139,7 +139,7 @@ proptest! {
     #[test]
     fn each_cbs_improvement_alone_matches_joint_search(
         (grid, agents) in instance(),
-        improvement in 0..3_usize,
+        improvement in 0..4_usize,
         makespan in any::<bool>(),
     ) {
         let objective = if makespan { Objective::Makespan } else { Objective::SumOfCosts };
@@ -147,7 +147,8 @@ proptest! {
         match improvement {
             0 => config.prioritize_conflicts = true,
             1 => config.bypass = true,
-            _ => config.cardinal_heuristic = true,
+            2 => config.heuristic = CbsHeuristic::Cg,
+            _ => config.conflict_avoidance = true,
         }
 
         check(&grid, &agents, Solver::Cbs(config))?;

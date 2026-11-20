@@ -190,9 +190,23 @@ adapter that implements `Successors`:
   `Unsolvable` from A* is a proof.
 
 Tie-breaking: heuristic-search breaks `f` ties towards larger `g`, which is what space-time
-A* wants (deeper, closer to the goal). A conflict-avoidance-table tie-break (fewer
-conflicts with other agents' paths, Sharon et al. 2015) needs a secondary key; see
-"Cross-crate needs".
+A* wants (deeper, closer to the goal).
+
+**Conflict avoidance table** (`CbsConfig::conflict_avoidance`, on in `cbs`). Among the
+cheapest paths, prefer the one with the fewest conflicts with the other agents' current
+paths (Sharon et al. 2015). The conflict count accumulates along the path like a cost, so
+the low level runs A* over a local `Lexicographic` cost `(time steps, conflicts)`
+(`low_level/lexicographic.rs`) with edge cost `(1, conflicts of the move)` and heuristic
+`(h, 0)`; that heuristic stays consistent, so A* returns a cheapest path with the fewest
+conflicts among the cheapest. The counts come from `ConflictTable` (`conflict_table.rs`,
+shared with ECBS): vertex conflicts, swaps and agents parked at their goals. Conflicts the
+agent causes by staying at its own goal are not counted: every cheapest path arrives at
+the same goal at the same time, so they add the same number to each. With the table, the
+root plans the agents one after another, each avoiding the earlier ones. Without it, the
+low level keeps a plain `u32` cost (a `Pricing` type parameter picks one), the hot path of
+plain CBS and PBS. Plain CBS needs 6 instead of 14 expansions on the benchmark instance
+and about 41 000 instead of 63 000 on the hard 3x3 instance; improved CBS about 7 000
+instead of 10 000 there.
 
 ### Decision: reuse heuristic-search
 
@@ -445,9 +459,8 @@ lower bound on 4-connected grids. Moves stay 4-connected, as in the MAPF benchma
    detection, constraints, space-time A* via heuristic-search, optimal CBS for SoC, oracle
    and property tests.
 2. **Done in this draft.** Makespan-optimal CBS; Moving AI `.map`/`.scen` parser.
-3. **Done in this draft:** MDDs, prioritized conflicts, bypass, CG heuristic. Open:
-   conflict avoidance table (needs the lexicographic cost from heuristic-search), DG/WDG,
-   disjoint splitting.
+3. **Done in this draft:** MDDs, prioritized conflicts, bypass, CG heuristic, conflict
+   avoidance table. Open: DG/WDG, disjoint splitting.
 4. **Done in this draft:** ECBS (local focal list), PBS (with `block_from`).
 5. **Done in this draft:** ICTS (shares MDDs), basic and recursive M*, every solver for
    both objectives. Open: ODrM*.
@@ -457,7 +470,9 @@ lower bound on 4-connected grids. Moves stay 4-connected, as in the MAPF benchma
 
 None blocks the milestones done so far. The two API additions below belong in
 heuristic-search. Focal search is implemented locally for now (see ECBS) because both
-crates change in parallel; the lexicographic cost is not implemented here.
+crates change in parallel. The lexicographic cost is implemented locally too
+(`low_level/lexicographic.rs`, a `(u32, u32)` pair implementing `heuristic_search::Cost`);
+a generic `Lexicographic<A, B>` in search-core or heuristic-search would replace it.
 
 Milestones 3 to 5 were developed against an export of heuristic-search's `b5cc485`,
 because its working tree was mid-change and did not compile at the time. The final checks
