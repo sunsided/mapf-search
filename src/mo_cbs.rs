@@ -259,8 +259,11 @@ pub fn mo_cbs<G: Graph, const N: usize>(
 /// `budget` is asked before every high-level expansion, before every root of plain
 /// MO-CBS, and inside the low level, before its first expansion and every 256 after; a
 /// stop there ends the run with [`ParetoOutcome::LimitReached`]. The low level sees the
-/// high-level counters, so a [`Limits`](crate::Limits) budget stops it only when those
-/// are exhausted, while a deadline or a cancellation flag in a closure stops it at once.
+/// counters of the completed high-level expansions, so a [`Limits`](crate::Limits) budget
+/// never stops it early, and `Limits::expansions(n)` lets a run of `n` expansions
+/// complete, while a deadline or a cancellation flag in a closure stops it at once. With
+/// [`MoCbsConfig::feasibility_check`], the check gets the budget first, with M*'s
+/// counters.
 ///
 /// # Examples
 ///
@@ -505,14 +508,15 @@ impl<'a, G: Graph, F: Fn(AgentId, Vertex, Vertex) -> [u32; N], const N: usize> S
     /// Splits `conflict` of `node` and opens the children: one node per combination of
     /// the replanned agents' Pareto paths, or, with bypass, `node` with better paths.
     fn expand(&mut self, node: &Node<N>, conflict: Conflict) -> Result<(), Interrupted> {
-        self.stats.expanded += 1;
-
         let mut children = Vec::new();
         for constraint in split::constraints(node, conflict, self.config.splitting) {
             if let Some(child) = self.child(node, constraint)? {
                 children.push(child);
             }
         }
+
+        // Counted only now, so that the low level's budget checks see completed expansions.
+        self.stats.expanded += 1;
 
         if self.config.bypass {
             if let Some(adopted) = children.iter().find_map(|child| split::bypass(node, child)) {

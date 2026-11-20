@@ -110,8 +110,9 @@ fn check<const N: usize>(
     }
 
     if result.outcome == ParetoOutcome::LimitReached {
-        // MO-CBS splits like plain CBS, which blows up on a few tightly coupled instances
-        // (see `cases::hard_instance_needs_many_expansions`); discard them.
+        // Without the improvements MO-CBS splits like plain CBS, which blows up on a few
+        // tightly coupled instances (see `cases::hard_instance_needs_many_expansions`);
+        // discard them.
         prop_assume!(false, "needs more than {} expansions", SOLVABLE_BUDGET);
     }
 
@@ -310,4 +311,38 @@ fn feasibility_check_proves_the_corridor_swap_unsolvable() {
 
     assert_eq!(improved.outcome, ParetoOutcome::Unsolvable);
     assert_eq!(plain.outcome, ParetoOutcome::LimitReached);
+}
+
+/// A budget of exactly the expansions a run needs lets it complete: the checks inside the
+/// low level see only completed expansions.
+#[test]
+fn exact_expansion_budget_completes() {
+    let edges = [
+        (0, 1),
+        (1, 2),
+        (2, 3),
+        (1, 4),
+        (0, 5),
+        (5, 6),
+        (6, 7),
+        (7, 8),
+        (8, 9),
+        (9, 3),
+    ];
+    let graph = AdjacencyList::undirected(10, &edges);
+    let costs = |_: Vertex, to: Vertex| [1, if to == 4 { 9 } else { 1 }];
+    let agents = vec![Agent { start: 0, goal: 3 }, Agent { start: 3, goal: 0 }];
+    let instance = Instance::new(graph, agents).expect("valid");
+
+    for config in [MoCbsConfig::plain(), MoCbsConfig::improved()] {
+        let free = mo_cbs_with(&instance, &costs, config, Limits::NONE);
+        let needed = free.stats.expanded;
+        let exact = mo_cbs_with(&instance, &costs, config, Limits::expansions(needed));
+        let short = mo_cbs_with(&instance, &costs, config, Limits::expansions(needed - 1));
+
+        assert!(needed > 0);
+        assert_eq!(exact.outcome, ParetoOutcome::Complete, "{config:?}");
+        assert_eq!(exact.front, free.front);
+        assert_eq!(short.outcome, ParetoOutcome::LimitReached, "{config:?}");
+    }
 }

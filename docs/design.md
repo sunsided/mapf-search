@@ -598,7 +598,9 @@ counters) before its first expansion and every 256 expansions after. Once the bu
 stop it generates no more successors, the search drains its open list, and the run ends
 with `LimitReached`. A `Limits` budget sees no change during one low-level call, so it
 still bounds high-level expansions only; a closure over a deadline or a cancellation flag
-stops a long low-level call.
+stops a long low-level call. High-level expansions are counted once their children are
+built, so the checks inside the low level see completed expansions only and
+`Limits::expansions(n)` lets a run that needs exactly `n` expansions complete.
 
 ### Paper comparison
 
@@ -613,7 +615,7 @@ stops a long low-level call.
 | Update: drop solutions dominated by a new one, then add it | `record` | same |
 | One child per Pareto path of the constrained agent | `expand` | same |
 | Terminate when OPEN is empty; `C` is the front | `ParetoOutcome::Complete` | same |
-| MO-CBS-t: tree-by-tree, roots generated on demand | `MoCbsConfig::tree_by_tree()`, the default of `mo_cbs` and of `MoCbsConfig`; `C` shared across trees | same |
+| MO-CBS-t: tree-by-tree, roots generated on demand | `MoCbsConfig::tree_by_tree()`; `improved()`, the default of `mo_cbs` and `MoCbsConfig`, is tree-by-tree too; `C` shared across trees | same |
 | MO-CBS-n: NAMOA*dr-st low level | `LowLevel::NamoaDr` (and `Auto` for `N != 2`) | same, via multiobjective-search |
 | MO-CBS-b: BOA*-st low level, two objectives | `LowLevel::Auto` with `N == 2` | same, via multiobjective-search |
 | Time horizon `T`, "a large positive integer" | `latest_step + vertex_count`, which loses no Pareto-optimal cost vector | sharper |
@@ -640,8 +642,8 @@ stops a long low-level call.
   On an unsolvable instance a run with the feasibility check must return `Unsolvable`.
   On a solvable instance the run must be `Complete`, its cost vectors equal to the
   oracle's, and every plan must pass the oracle's plan checker and `first_conflict`, with
-  its cost recomputed from the paths. MO-CBS splits like plain CBS (standard splitting,
-  no bypass, no heuristic), so it shares plain CBS's blow-ups on a few tightly coupled
+  its cost recomputed from the paths. Without the improvements MO-CBS splits like plain
+  CBS (standard splitting, no bypass, no heuristic), so it shares plain CBS's blow-ups on a few tightly coupled
   instances: those that hit the 20 000-expansion budget are discarded, at most 8 per
   property. One such instance (3x3, middle row walled except the centre, three agents)
   needs over 200 000 expansions with unit costs, as does plain CBS, while improved CBS

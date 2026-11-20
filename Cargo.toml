@@ -20,8 +20,8 @@ heuristic-search = { path = "../heuristic-search", version = "0.0.0" }
 multiobjective-search = { path = "../multiobjective-search", version = "0.0.0", optional = true }
 
 [features]
-## Multi-objective CBS (`mo_cbs`, `mo_cbs_with`) over NAMOA*dr-st or BOA*-st from
-## `multiobjective-search`.
+## Multi-objective CBS (`mo_cbs`, `mo_cbs_with`, `mo_cbs_per_agent`) over NAMOA*dr-st
+## or BOA*-st from `multiobjective-search`, with its optional improvements.
 multi-objective = ["dep:multiobjective-search"]
 
 [dev-dependencies]
