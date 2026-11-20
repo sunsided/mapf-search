@@ -1,8 +1,11 @@
-//! Property tests: on random tiny grids with 2-3 agents, CBS agrees with the joint-space
-//! oracle on solvability and on the optimal sum of costs and makespan.
+//! Property tests: on random tiny grids with 2-3 agents, CBS in every configuration agrees
+//! with the joint-space oracle on solvability and on the optimal sum of costs and makespan.
 
 use heuristic_search::Limits;
-use mapf_search::{Agent, Grid, Instance, Objective, Outcome, Vertex, cbs, first_conflict};
+use mapf_search::{
+    Agent, CbsConfig, Grid, Instance, MapfResult, Objective, Outcome, Vertex, cbs_with,
+    first_conflict,
+};
 use proptest::prelude::*;
 
 use crate::oracle::{assert_valid_plan, optimal_cost};
@@ -59,9 +62,22 @@ fn grid(width: usize, height: usize, blocked: &[bool]) -> Grid {
     grid
 }
 
-/// Runs CBS for `objective` and compares it with the oracle: the same solvability, and on
+/// Runs CBS with `config` and compares it with the oracle: the same solvability, and on
 /// solvable instances a valid, conflict-free plan of the optimal cost.
-fn check(grid: &Grid, agents: &[Agent], objective: Objective) -> Result<(), TestCaseError> {
+fn check(grid: &Grid, agents: &[Agent], config: CbsConfig) -> Result<(), TestCaseError> {
+    check_optimal(grid, agents, config.objective, |instance, budget| {
+        cbs_with(instance, config, Limits::expansions(budget))
+    })
+}
+
+/// Runs an optimal solver for `objective` (given an instance and a budget) and compares it
+/// with the oracle, as [`check`] describes.
+pub fn check_optimal(
+    grid: &Grid,
+    agents: &[Agent],
+    objective: Objective,
+    solve: impl Fn(&Instance<Grid>, u64) -> MapfResult,
+) -> Result<(), TestCaseError> {
     let optimum = optimal_cost(grid, agents, objective);
     let budget = if optimum.is_some() {
         SOLVABLE_BUDGET
@@ -69,7 +85,7 @@ fn check(grid: &Grid, agents: &[Agent], objective: Objective) -> Result<(), Test
         UNSOLVABLE_BUDGET
     };
     let instance = Instance::new(grid.clone(), agents.to_vec()).expect("valid by construction");
-    let result = cbs(&instance, objective, Limits::expansions(budget));
+    let result = solve(&instance, budget);
 
     match (optimum, result.outcome) {
         (Some(optimum), Outcome::Solved(solution)) => {
@@ -82,10 +98,10 @@ fn check(grid: &Grid, agents: &[Agent], objective: Objective) -> Result<(), Test
         (Some(_), Outcome::LimitReached) => {
             // Plain CBS blows up on a few tightly coupled instances (about 1 in 600 here,
             // see `cases::hard_instance_needs_many_expansions`); discard them.
-            prop_assume!(false, "CBS needs more than {} expansions", SOLVABLE_BUDGET);
+            prop_assume!(false, "needs more than {} expansions", SOLVABLE_BUDGET);
         }
         (optimum, outcome) => {
-            prop_assert!(false, "oracle {optimum:?}, CBS {outcome:?}");
+            prop_assert!(false, "oracle {optimum:?}, solver {outcome:?}");
         }
     }
 
@@ -100,15 +116,45 @@ proptest! {
         ..ProptestConfig::default()
     })]
 
-    /// CBS for sum of costs agrees with the oracle.
+    /// Plain CBS for sum of costs agrees with the oracle.
     #[test]
-    fn cbs_matches_joint_search_for_sum_of_costs((grid, agents) in instance()) {
-        check(&grid, &agents, Objective::SumOfCosts)?;
+    fn plain_cbs_matches_joint_search_for_sum_of_costs((grid, agents) in instance()) {
+        check(&grid, &agents, CbsConfig::plain(Objective::SumOfCosts))?;
     }
 
-    /// CBS for makespan agrees with the oracle.
+    /// Plain CBS for makespan agrees with the oracle.
     #[test]
-    fn cbs_matches_joint_search_for_makespan((grid, agents) in instance()) {
-        check(&grid, &agents, Objective::Makespan)?;
+    fn plain_cbs_matches_joint_search_for_makespan((grid, agents) in instance()) {
+        check(&grid, &agents, CbsConfig::plain(Objective::Makespan))?;
+    }
+
+    /// Improved CBS for sum of costs agrees with the oracle.
+    #[test]
+    fn improved_cbs_matches_joint_search_for_sum_of_costs((grid, agents) in instance()) {
+        check(&grid, &agents, CbsConfig::improved(Objective::SumOfCosts))?;
+    }
+
+    /// Improved CBS for makespan (the CG heuristic is off there) agrees with the oracle.
+    #[test]
+    fn improved_cbs_matches_joint_search_for_makespan((grid, agents) in instance()) {
+        check(&grid, &agents, CbsConfig::improved(Objective::Makespan))?;
+    }
+
+    /// Each improvement alone keeps CBS optimal, for both objectives.
+    #[test]
+    fn each_cbs_improvement_alone_matches_joint_search(
+        (grid, agents) in instance(),
+        improvement in 0..3_usize,
+        makespan in any::<bool>(),
+    ) {
+        let objective = if makespan { Objective::Makespan } else { Objective::SumOfCosts };
+        let mut config = CbsConfig::plain(objective);
+        match improvement {
+            0 => config.prioritize_conflicts = true,
+            1 => config.bypass = true,
+            _ => config.cardinal_heuristic = true,
+        }
+
+        check(&grid, &agents, config)?;
     }
 }

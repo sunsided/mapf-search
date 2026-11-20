@@ -10,14 +10,16 @@
 //! swap vertices along an edge.
 //!
 //! - [`cbs()`]: conflict-based search, optimal for [`sum_of_costs`] or [`makespan`]
-//!   ([`Objective`]).
+//!   ([`Objective`]), with prioritized conflicts, bypass and the CG heuristic;
+//!   [`cbs_with`] and [`CbsConfig`] switch them individually.
 //! - [`space_time_astar`]: the single-agent low level under [`Constraint`]s, built on the
 //!   `heuristic-search` crate's A*.
 //! - [`first_conflict`] and [`conflicts`]: conflict detection on any set of paths.
 //! - [`parse_map`], [`parse_scenario`] and [`scenario_instance`]: Moving AI benchmarks.
 //!
-//! [`Budget`], [`Limits`] and [`Stats`] are re-exported from `heuristic-search`; they bound
-//! and count CBS's constraint-tree expansions.
+//! Every solver returns a [`MapfResult`]: an [`Outcome`] (with a [`Solution`] if solved)
+//! and high-level [`Stats`]. [`Budget`], [`Limits`] and [`Stats`] are re-exported from
+//! `heuristic-search`; they bound and count the high-level expansions.
 //!
 //! The crate is `no_std` and needs only `alloc`.
 //!
@@ -44,8 +46,8 @@
 //!
 //! ## Planned scope
 //!
-//! - Conflict-based: ECBS, CBS-TA, and CBS improvements (prioritized conflicts,
-//!   heuristics, disjoint splitting)
+//! - Conflict-based: ECBS, CBS-TA, and more CBS improvements (DG/WDG heuristics,
+//!   disjoint splitting)
 //! - Cost-vector search: ICTS
 //! - Priority-based: PBS
 //! - Subdimensional: M*
@@ -71,10 +73,12 @@ mod constraint;
 mod graph;
 mod instance;
 mod low_level;
+mod mdd;
 mod movingai;
 mod path;
+mod solution;
 
-pub use cbs::{CbsResult, Outcome, Solution, cbs};
+pub use cbs::{CbsConfig, cbs, cbs_with};
 pub use conflict::{Conflict, conflicts, first_conflict};
 pub use constraint::{Constraint, ConstraintSet};
 pub use graph::{AdjacencyList, Graph, Grid, Vertex};
@@ -86,3 +90,4 @@ pub use movingai::{
     scenario_instance,
 };
 pub use path::{Objective, Path, Time, makespan, path_cost, position_at, sum_of_costs};
+pub use solution::{MapfResult, Outcome, Solution};

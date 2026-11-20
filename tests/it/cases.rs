@@ -3,8 +3,8 @@
 
 use heuristic_search::Limits;
 use mapf_search::{
-    AdjacencyList, Agent, Conflict, Constraint, ConstraintSet, Grid, Instance, InstanceError,
-    Objective, Outcome, cbs, conflicts, first_conflict, space_time_astar,
+    AdjacencyList, Agent, CbsConfig, Conflict, Constraint, ConstraintSet, Grid, Instance,
+    InstanceError, Objective, Outcome, cbs, cbs_with, conflicts, first_conflict, space_time_astar,
 };
 
 use crate::oracle::{assert_valid_plan, optimal_cost};
@@ -174,29 +174,36 @@ fn invalid_instances_are_rejected() {
     );
 }
 
-/// A solvable instance on which plain CBS needs about 73 000 expansions: the three agents
-/// must thread past each other through the centre of a nearly blocked 3x3 grid. Found by
-/// the property test. Slow in debug builds; run with `--release -- --ignored`.
+/// The hard instance: the three agents must thread past each other through the centre of
+/// a nearly blocked 3x3 grid. Found by the property test.
 ///
 /// ```text
 /// @ . @
 /// . . .
 /// . @ .
 /// ```
-#[test]
-#[ignore = "slow: plain CBS needs about 73 000 expansions"]
-fn hard_instance_needs_many_expansions() {
+fn hard_instance() -> (Grid, Vec<Agent>) {
     let grid = Grid::parse(&["@.@", "...", ".@."]);
     let agents = vec![
         Agent { start: 1, goal: 3 },
         Agent { start: 6, goal: 5 },
         Agent { start: 4, goal: 1 },
     ];
+
+    (grid, agents)
+}
+
+/// Plain CBS needs about 73 000 expansions on [`hard_instance`]. Slow in debug builds; run
+/// with `--release -- --ignored`.
+#[test]
+#[ignore = "slow: plain CBS needs about 73 000 expansions"]
+fn hard_instance_needs_many_expansions() {
+    let (grid, agents) = hard_instance();
     let instance = Instance::new(grid.clone(), agents.clone()).expect("valid");
 
-    let result = cbs(
+    let result = cbs_with(
         &instance,
-        Objective::SumOfCosts,
+        CbsConfig::plain(Objective::SumOfCosts),
         Limits::expansions(200_000),
     );
     let solution = result.solution().expect("solvable");
@@ -207,4 +214,22 @@ fn hard_instance_needs_many_expansions() {
         optimal_cost(&grid, &agents, Objective::SumOfCosts),
         Some(19)
     );
+}
+
+/// Improved CBS (prioritized conflicts, bypass, CG) solves [`hard_instance`] with a small
+/// fraction of plain CBS's expansions.
+#[test]
+fn improved_cbs_solves_the_hard_instance() {
+    let (grid, agents) = hard_instance();
+    let instance = Instance::new(grid.clone(), agents.clone()).expect("valid");
+
+    let result = cbs(
+        &instance,
+        Objective::SumOfCosts,
+        Limits::expansions(200_000),
+    );
+    let solution = result.solution().expect("solvable");
+
+    assert_eq!(assert_valid_plan(&grid, &agents, &solution.paths).0, 19);
+    assert!(result.stats.expanded < 15_000, "{:?}", result.stats);
 }

@@ -61,6 +61,18 @@ impl ConstraintSet {
         Self::default()
     }
 
+    /// The set of those of `constraints` that name `agent`.
+    #[must_use]
+    pub fn for_agent(agent: AgentId, constraints: &[Constraint]) -> Self {
+        let mut set = Self::new();
+        constraints
+            .iter()
+            .filter(|constraint| constraint.agent() == agent)
+            .for_each(|constraint| set.insert(constraint));
+
+        set
+    }
+
     /// Adds `constraint`, ignoring which agent it names.
     pub fn insert(&mut self, constraint: &Constraint) {
         match *constraint {
