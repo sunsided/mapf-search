@@ -10,8 +10,9 @@
 //! swap vertices along an edge.
 //!
 //! - [`cbs()`]: conflict-based search, optimal for [`sum_of_costs`] or [`makespan`]
-//!   ([`Objective`]), with prioritized conflicts, bypass, the CG heuristic and a
-//!   conflict avoidance table; [`cbs_with`] and [`CbsConfig`] switch them individually.
+//!   ([`Objective`]), with prioritized conflicts, bypass, the CG heuristic, a conflict
+//!   avoidance table and disjoint [`Splitting`]; [`cbs_with`] and [`CbsConfig`] switch
+//!   them individually.
 //! - [`ecbs`]: enhanced CBS, bounded-suboptimal within a [`Weight`] `w`, with focal search
 //!   at both levels.
 //! - [`icts`]: increasing cost tree search with pairwise pruning, optimal.
@@ -54,8 +55,7 @@
 //!
 //! ## Planned scope
 //!
-//! - Conflict-based: CBS-TA, and more CBS improvements (DG/WDG heuristics,
-//!   disjoint splitting)
+//! - Conflict-based: CBS-TA, and more CBS improvements (DG/WDG heuristics)
 //! - Local repair: MAPF-LNS2
 //! - Partial expansion: EPEA*
 //!
@@ -89,7 +89,7 @@ mod path;
 mod pbs;
 mod solution;
 
-pub use cbs::{CbsConfig, CbsHeuristic, cbs, cbs_with};
+pub use cbs::{CbsConfig, CbsHeuristic, Splitting, cbs, cbs_with};
 pub use conflict::{Conflict, conflicts, first_conflict};
 pub use constraint::{Constraint, ConstraintSet};
 pub use ecbs::ecbs;

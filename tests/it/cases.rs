@@ -4,8 +4,8 @@
 use heuristic_search::Limits;
 use mapf_search::{
     AdjacencyList, Agent, CbsConfig, Conflict, Constraint, ConstraintSet, Grid, Instance,
-    InstanceError, MStarConfig, Objective, Outcome, cbs, cbs_with, conflicts, first_conflict,
-    mstar_with, space_time_astar,
+    InstanceError, MStarConfig, Objective, Outcome, Splitting, cbs, cbs_with, conflicts,
+    first_conflict, mstar_with, space_time_astar,
 };
 
 use crate::oracle::{assert_valid_plan, optimal_cost};
@@ -194,10 +194,10 @@ fn hard_instance() -> (Grid, Vec<Agent>) {
     (grid, agents)
 }
 
-/// Plain CBS needs about 73 000 expansions on [`hard_instance`]. Slow in debug builds; run
+/// Plain CBS needs about 63 000 expansions on [`hard_instance`]. Slow in debug builds; run
 /// with `--release -- --ignored`.
 #[test]
-#[ignore = "slow: plain CBS needs about 73 000 expansions"]
+#[ignore = "slow: plain CBS needs about 63 000 expansions"]
 fn hard_instance_needs_many_expansions() {
     let (grid, agents) = hard_instance();
     let instance = Instance::new(grid.clone(), agents.clone()).expect("valid");
@@ -217,22 +217,60 @@ fn hard_instance_needs_many_expansions() {
     );
 }
 
-/// Improved CBS (prioritized conflicts, bypass, CG) solves [`hard_instance`] with a small
-/// fraction of plain CBS's expansions.
+/// Improved CBS (prioritized conflicts, bypass, CG, conflict avoidance, disjoint
+/// splitting) solves [`hard_instance`] with about 1% of plain CBS's expansions; disjoint
+/// splitting alone saves about nine in ten of the rest.
 #[test]
 fn improved_cbs_solves_the_hard_instance() {
     let (grid, agents) = hard_instance();
     let instance = Instance::new(grid.clone(), agents.clone()).expect("valid");
+    let improved = CbsConfig::improved(Objective::SumOfCosts);
+    let standard = CbsConfig {
+        splitting: Splitting::Standard,
+        ..improved
+    };
 
-    let result = cbs(
-        &instance,
-        Objective::SumOfCosts,
-        Limits::expansions(200_000),
-    );
+    let result = cbs_with(&instance, improved, Limits::expansions(200_000));
     let solution = result.solution().expect("solvable");
-
     assert_eq!(assert_valid_plan(&grid, &agents, &solution.paths).0, 19);
-    assert!(result.stats.expanded < 15_000, "{:?}", result.stats);
+    assert!(result.stats.expanded < 1_500, "{:?}", result.stats);
+
+    let without = cbs_with(&instance, standard, Limits::expansions(200_000));
+    let solution = without.solution().expect("solvable");
+    assert_eq!(assert_valid_plan(&grid, &agents, &solution.paths).0, 19);
+    assert!(
+        result.stats.expanded * 5 < without.stats.expanded,
+        "{:?} vs {:?}",
+        result.stats,
+        without.stats
+    );
+}
+
+/// A positive constraint makes the low level detour through the required vertex, and a
+/// positive constraint on another agent keeps the agent away from it.
+#[test]
+fn low_level_respects_positive_constraints() {
+    let grid = Grid::new(5, 1);
+    let agent = Agent { start: 2, goal: 4 };
+    let required = Constraint::PositiveVertex {
+        agent: 0,
+        vertex: 0,
+        time: 3,
+    };
+
+    let own = ConstraintSet::for_agent(0, &[required]);
+    let path = space_time_astar(&grid, agent, &own).expect("detour");
+    assert_eq!(
+        path.len(),
+        8,
+        "to 0 by time 3, then 4 steps to the goal: {path:?}"
+    );
+    assert_eq!(path[3], 0);
+
+    let others = ConstraintSet::for_agent(1, &[required]);
+    let agent = Agent { start: 1, goal: 0 };
+    let path = space_time_astar(&grid, agent, &others).expect("arrives after 3");
+    assert_eq!(path.len(), 5, "may not sit at 0 at time 3: {path:?}");
 }
 
 /// Two pairs of agents swap places in two rooms, the right pair later than the left one.

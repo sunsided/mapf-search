@@ -5,8 +5,8 @@ Multi-agent pathfinding: CBS, ECBS, CBS-TA, ICTS, PBS, M* and MAPF-LNS2.
 ## Implemented
 
 - CBS, optimal for sum of costs or makespan, with prioritized (cardinal) conflicts,
-  bypass, the CG heuristic and a conflict avoidance table, each switchable (`cbs`,
-  `cbs_with`, `CbsConfig`)
+  bypass, the CG heuristic, a conflict avoidance table and disjoint splitting (with
+  positive constraints), each switchable (`cbs`, `cbs_with`, `CbsConfig`)
 - ECBS, bounded-suboptimal, focal search at both levels (`ecbs`)
 - PBS, priority-based search: fast, neither optimal nor complete (`pbs`)
 - ICTS with pairwise pruning, optimal (`icts`)
@@ -18,7 +18,7 @@ Multi-agent pathfinding: CBS, ECBS, CBS-TA, ICTS, PBS, M* and MAPF-LNS2.
 
 ## Planned scope
 
-- Conflict-based: CBS-TA; DG/WDG heuristics and disjoint splitting for CBS
+- Conflict-based: CBS-TA; DG/WDG heuristics for CBS
 - ODrM* (operator decomposition for recursive M*)
 - Local repair: MAPF-LNS2
 - Partial expansion: EPEA*

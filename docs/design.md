@@ -99,8 +99,28 @@ vertex. It counts towards `latest_step()`, so the horizon argument below still h
 graph minus the blocked vertices, and `blocked_until` reports `Time::MAX` for such a vertex:
 an agent can never finish there.
 
-Positive constraints (disjoint splitting, Li et al. 2019) are later work; the
-representation keeps room for them as new variants.
+**Positive constraints** (disjoint splitting, Li et al. 2019):
+
+- `PositiveVertex { agent, vertex, time }`: agent must be at `vertex` at `time`;
+- `PositiveEdge { agent, from, to, time }`: agent must move `from -> to` then.
+
+A positive constraint implies negative ones for every *other* agent: nobody else at
+`vertex` at `time`; for an edge nobody else at `from` at `time`, at `to` at `time + 1`, or
+moving `to -> from`. `ConstraintSet::for_agent` adds those, so the A* low level, the MDDs
+and every other user of a `ConstraintSet` see them without knowing about positive
+constraints. In the set, a positive edge is two required `(time, vertex)` pairs (being at
+`from` at `t` and at `to != from` at `t + 1` is that move). A required pair forbids every
+other vertex at its time, so two different ones at one time make the set unsatisfiable;
+it counts towards `latest_step()`, and towards `blocked_until(goal)` when it requires
+another vertex.
+
+The low level also uses them as **landmarks** (`low_level/landmarks.rs`): at time `t`, a
+state farther than `t_k - t` from the next required vertex `v_k` is pruned, and if the
+path must go on after `t_k`, the heuristic is at least `t_k - t` plus the rest of the chain.
+A landmark at the goal with nothing after it only prunes: goal-stay lets the agent arrive
+early and wait there. (Bounding through it anyway was a bug the benchmark caught: CBS
+returned sum of costs 94 instead of 92.) The landmark estimate is consistent, and the
+maximum of it and the plain heuristic is too.
 
 ## CBS (Sharon et al. 2015)
 
@@ -147,9 +167,21 @@ objective value of the result.
   lower bound) and searches exactly up to size 12, which is exponential in the size. Above
   that it returns the largest size proven necessary. A greedy *cover* would overestimate
   and break optimality. Admissible for sum of costs only, so it is off for makespan.
-- On the hard 3x3 instance below, plain CBS needs about 73 000 expansions; with all
-  improvements about 10 000. DG/WDG heuristics (Li et al. 2019) and disjoint splitting
-  would cut this further.
+- **Disjoint splitting** (Li et al. 2019, `Splitting::Disjoint`). For a conflict of `a`
+  and `b`, pick one agent `i`; one child gets the negative constraint on `i` (as in
+  standard splitting), the other the positive one, which forbids the conflict to everyone
+  else. The two subtrees share no solution. The positive child keeps `i`'s path (it takes
+  part in the conflict, so it meets the constraint, and stays optimal under more
+  constraints) but drops `i`'s MDD, and replans every other agent whose path breaks an
+  implied negative constraint. `i` is the agent whose MDD forces it through the conflict,
+  if exactly one is and both MDDs are known, else the smaller id: then the positive child
+  keeps `i`'s cost and the negative one raises it. Bypass takes over all the paths a
+  child replanned when each of them keeps its cost. Agents that are not replanned keep
+  their MDDs, which may be wider than under the new implied constraints; a wider MDD only
+  makes conflicts look less cardinal, so the CG bound stays admissible.
+- On the hard 3x3 instance below, plain CBS needs about 73 000 expansions (63 000 since
+  the low level's tie-breaking changed), plain CBS with disjoint splitting about 1 200,
+  and with all improvements about 740 (7 000 with standard splitting).
 
 **Duplicate handling.** A child never re-adds a constraint its parent already holds: the
 parent's paths satisfy all of its constraints, and the new constraint is violated by
@@ -431,7 +463,7 @@ lower bound on 4-connected grids. Moves stay 4-connected, as in the MAPF benchma
   `Solved`. A complete solver must not return `Unsolvable` on a solvable instance. About
   1 in 600 random solvable instances needs more than the 20 000 expansions the property
   test allows (plain CBS blows up on tightly coupled agents); those cases are discarded, and
-  one of them (73 000 expansions for plain CBS, about 10 000 improved) is kept as a
+  one of them (63 000 expansions for plain CBS, about 740 improved) is kept as a
   regression test. Each property passed 1 500 cases once in release mode.
 - **Cross-checks** on random 4x4 to 5x5 grids with 3-4 agents, too large for the oracle:
   improved CBS, ICTS and M* agree on the sum of costs whenever they solve, ECBS and PBS
@@ -460,7 +492,7 @@ lower bound on 4-connected grids. Moves stay 4-connected, as in the MAPF benchma
    and property tests.
 2. **Done in this draft.** Makespan-optimal CBS; Moving AI `.map`/`.scen` parser.
 3. **Done in this draft:** MDDs, prioritized conflicts, bypass, CG heuristic, conflict
-   avoidance table. Open: DG/WDG, disjoint splitting.
+   avoidance table, disjoint splitting. Open: DG/WDG.
 4. **Done in this draft:** ECBS (local focal list), PBS (with `block_from`).
 5. **Done in this draft:** ICTS (shares MDDs), basic and recursive M*, every solver for
    both objectives. Open: ODrM*.

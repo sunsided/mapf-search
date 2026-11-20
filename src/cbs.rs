@@ -35,11 +35,11 @@ use core::cmp::{Ordering, Reverse};
 
 use heuristic_search::{Budget, Stats};
 
-use self::cardinal::{Cardinality, cardinality, vertex_cover_bound};
+use self::cardinal::{Cardinality, cardinality, forced, vertex_cover_bound};
 use crate::conflict::{Conflict, conflicts};
 use crate::conflict_table::ConflictTable;
 use crate::constraint::{Constraint, ConstraintSet};
-use crate::graph::{Graph, Vertex};
+use crate::graph::Graph;
 use crate::instance::{AgentId, Instance};
 use crate::low_level::{distance_tables, plan, plan_avoiding};
 use crate::mdd::Mdd;
@@ -60,6 +60,8 @@ pub struct CbsConfig {
     /// Bypass (Boyarski et al. 2015): when a child is as cheap for its replanned agent as
     /// the parent and has fewer conflicts, take over its paths instead of splitting.
     pub bypass: bool,
+    /// How a conflict is split into two children.
+    pub splitting: Splitting,
     /// The admissible high-level heuristic added to a node's sum of costs. Admissible for
     /// [`Objective::SumOfCosts`] only; ignored for [`Objective::Makespan`].
     pub heuristic: CbsHeuristic,
@@ -77,6 +79,7 @@ impl CbsConfig {
             objective,
             prioritize_conflicts: false,
             bypass: false,
+            splitting: Splitting::Standard,
             heuristic: CbsHeuristic::None,
             conflict_avoidance: false,
         }
@@ -89,6 +92,7 @@ impl CbsConfig {
             objective,
             prioritize_conflicts: true,
             bypass: true,
+            splitting: Splitting::Disjoint,
             heuristic: CbsHeuristic::Cg,
             conflict_avoidance: true,
         }
@@ -111,6 +115,25 @@ impl CbsConfig {
     fn uses_heuristic(self) -> bool {
         self.effective_heuristic() != CbsHeuristic::None
     }
+}
+
+/// How CBS splits a conflict between agents `a` and `b` ([`CbsConfig::splitting`]).
+///
+/// Both keep every solution in exactly one child or in both, so both are optimal.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum Splitting {
+    /// One child forbids the conflict to `a`, the other to `b` (Sharon et al. 2015). A
+    /// solution that avoids the conflict both ways lies below both children.
+    #[default]
+    Standard,
+    /// Disjoint splitting (Li et al. 2019): one child forbids the conflict to one agent,
+    /// the other requires it of that agent with a positive constraint, which forbids it to
+    /// every other agent. The two subtrees share no solution.
+    ///
+    /// The split agent is the one for whom the conflict is forced (every cheapest path takes
+    /// part in it) if only one is and its MDD is known, else the smaller id. Forcing it keeps
+    /// its cost in the positive child and raises it in the negative one.
+    Disjoint,
 }
 
 /// An admissible estimate of how much the sum of costs of a constraint-tree node must still
@@ -322,50 +345,66 @@ impl<'a, G: Graph> Search<'a, G> {
     fn expand(&mut self, parent: Node, conflict: Conflict) {
         self.stats.expanded += 1;
 
-        let children: Vec<(AgentId, Node)> = Constraint::resolving(conflict)
+        let children: Vec<Child> = self
+            .split(&parent, conflict)
             .into_iter()
-            .filter_map(|constraint| Some((constraint.agent(), self.child(&parent, constraint)?)))
+            .filter_map(|constraint| self.child(&parent, constraint))
             .collect();
 
         if self.config.bypass {
-            let bypass = children
-                .iter()
-                .find(|(agent, child)| is_bypass(&parent, child, *agent));
-            if let Some((agent, child)) = bypass {
-                let adopted = self.adopt(parent, *agent, &child.paths[*agent]);
+            if let Some(child) = children.iter().find(|child| is_bypass(&parent, child)) {
+                let adopted = self.adopt(parent, child);
                 self.push(adopted);
                 return;
             }
         }
 
-        for (_, child) in children {
-            self.push(child);
+        for child in children {
+            self.push(child.node);
         }
     }
 
-    /// `parent` with the path of `agent` replaced by `path`, which satisfies the parent's
-    /// constraints at the same cost, so the agent's MDD stays valid.
-    fn adopt(&self, parent: Node, agent: AgentId, path: &[Vertex]) -> Node {
+    /// The constraints of the two children that split `conflict` of `parent`.
+    fn split(&self, parent: &Node, conflict: Conflict) -> [Constraint; 2] {
+        match self.config.splitting {
+            Splitting::Standard => Constraint::resolving(conflict),
+            Splitting::Disjoint => Constraint::disjoint(conflict, split_side(parent, &conflict)),
+        }
+    }
+
+    /// `parent` with the paths of the agents `child` replanned, which satisfy the parent's
+    /// constraints at the same costs, so their MDDs stay valid.
+    fn adopt(&self, parent: Node, child: &Child) -> Node {
         let mut paths = parent.paths;
-        paths[agent] = path.to_vec();
+        for &agent in &child.replanned {
+            paths[agent].clone_from(&child.node.paths[agent]);
+        }
 
         self.node(parent.constraints, paths, parent.mdds)
     }
 
-    /// The child of `parent` with `constraint` added, or `None` if the constrained agent
-    /// then has no path.
-    fn child(&self, parent: &Node, constraint: Constraint) -> Option<Node> {
+    /// The child of `parent` with `constraint` added, or `None` if an agent it replans has
+    /// no path.
+    ///
+    /// A negative constraint replans its agent. A positive one keeps its agent's path,
+    /// which takes part in the conflict and so meets it, and replans every other agent whose
+    /// path breaks what it implies for them.
+    fn child(&self, parent: &Node, constraint: Constraint) -> Option<Child> {
         let mut constraints = parent.constraints.clone();
         constraints.push(constraint);
 
-        let agent = constraint.agent();
-        let path = self.replan(agent, &constraints, &parent.paths)?;
+        let replanned = affected(constraint, &parent.paths);
         let mut paths = parent.paths.clone();
-        paths[agent] = path;
         let mut mdds = parent.mdds.clone();
-        mdds[agent] = None;
+        for &agent in &replanned {
+            paths[agent] = self.replan(agent, &constraints, &paths)?;
+            mdds[agent] = None;
+        }
 
-        Some(self.node(constraints, paths, mdds))
+        mdds[constraint.agent()] = None;
+        let node = self.node(constraints, paths, mdds);
+
+        Some(Child { node, replanned })
     }
 
     /// The cheapest path of `agent` under those of `constraints` that name it; with
@@ -486,12 +525,57 @@ impl<'a, G: Graph> Search<'a, G> {
     }
 }
 
-/// Returns `true` if `child`, which replanned `agent`, may replace the paths of `parent`:
-/// the agent's path costs the same, so it is still optimal under the parent's constraints,
-/// and there are strictly fewer conflicts.
-fn is_bypass(parent: &Node, child: &Node, agent: AgentId) -> bool {
-    path_cost(&child.paths[agent]) == path_cost(&parent.paths[agent])
-        && child.conflict_count < parent.conflict_count
+/// A child node and the agents it replanned.
+struct Child {
+    /// The node.
+    node: Node,
+    /// The agents whose paths were replanned for the child's new constraint.
+    replanned: Vec<AgentId>,
+}
+
+/// Returns `true` if `child` may lend its replanned paths to `parent`: each costs the same
+/// as the parent's, so it is still optimal under the parent's constraints, and there are
+/// strictly fewer conflicts.
+fn is_bypass(parent: &Node, child: &Child) -> bool {
+    let same_cost = child
+        .replanned
+        .iter()
+        .all(|&agent| path_cost(&child.node.paths[agent]) == path_cost(&parent.paths[agent]));
+
+    same_cost && child.node.conflict_count < parent.conflict_count
+}
+
+/// The agents whose paths in `paths` must be replanned once `constraint` is added: its own
+/// agent for a negative constraint, every other agent whose path breaks what a positive
+/// one implies for it.
+fn affected(constraint: Constraint, paths: &[Path]) -> Vec<AgentId> {
+    if !constraint.is_positive() {
+        return Vec::from([constraint.agent()]);
+    }
+
+    (0..paths.len())
+        .filter(|&agent| agent != constraint.agent())
+        .filter(|&agent| {
+            constraint
+                .implied_for(agent)
+                .iter()
+                .any(|implied| implied.is_violated_by(&paths[agent]))
+        })
+        .collect()
+}
+
+/// Which agent of `conflict` disjoint splitting constrains: `1` (the second) if only that
+/// one is forced through the conflict by its MDD, else `0`. Without both MDDs, `0`.
+fn split_side(parent: &Node, conflict: &Conflict) -> usize {
+    let (a, b) = conflict.agents();
+    if parent.mdds[a].is_none() || parent.mdds[b].is_none() {
+        return 0;
+    }
+
+    match forced(conflict, &parent.mdds) {
+        [false, true] => 1,
+        _ => 0,
+    }
 }
 
 #[cfg(test)]

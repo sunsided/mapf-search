@@ -31,9 +31,25 @@ pub(super) enum Cardinality {
 ///
 /// Panics if an involved agent has no MDD in `mdds`.
 pub(super) fn cardinality(conflict: &Conflict, mdds: &[Option<Rc<Mdd>>]) -> Cardinality {
+    match forced(conflict, mdds) {
+        [true, true] => Cardinality::Cardinal,
+        [false, false] => Cardinality::NonCardinal,
+        _ => Cardinality::SemiCardinal,
+    }
+}
+
+/// For each of the two agents of `conflict` (the smaller id first), whether every one of
+/// its cheapest paths takes part in the conflict: its MDD has the conflicting vertex (for a
+/// swap: both ends) as the only node at that time.
+///
+/// # Panics
+///
+/// Panics if an involved agent has no MDD in `mdds`.
+pub(super) fn forced(conflict: &Conflict, mdds: &[Option<Rc<Mdd>>]) -> [bool; 2] {
     let (a, b) = conflict.agents();
     let mdd = |agent: AgentId| mdds[agent].as_deref().expect("MDDs of conflicting agents");
-    let forced = match *conflict {
+
+    match *conflict {
         Conflict::Vertex { vertex, time, .. } => {
             [a, b].map(|agent| mdd(agent).singleton(time) == Some(vertex))
         }
@@ -43,12 +59,6 @@ pub(super) fn cardinality(conflict: &Conflict, mdds: &[Option<Rc<Mdd>>]) -> Card
                 mdd.singleton(time) == Some(from) && mdd.singleton(time + 1) == Some(to)
             })
         }
-    };
-
-    match forced {
-        [true, true] => Cardinality::Cardinal,
-        [false, false] => Cardinality::NonCardinal,
-        _ => Cardinality::SemiCardinal,
     }
 }
 

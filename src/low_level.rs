@@ -7,6 +7,9 @@
 //! there it does so within `vertex_count - 1` more steps. Every path that exists also exists
 //! within the horizon, so an exhausted search proves that the agent has no path.
 //!
+//! Positive constraints (disjoint splitting) are [`Landmarks`]: the heuristic also bounds
+//! the cost through the next required vertex, and prunes states too far from it.
+//!
 //! With a [`ConflictTable`] ([`plan_avoiding`]), the cost is [`Lexicographic`]: time steps
 //! first, then conflicts with the other agents' paths, so the result is a cheapest path with
 //! the fewest conflicts among the cheapest (the conflict avoidance table of Sharon et al.
@@ -15,12 +18,14 @@
 //! goal at the same time, so they would add the same number to each. (ECBS's focal low
 //! level, which may take longer paths, does count them.)
 
+mod landmarks;
 mod lexicographic;
 
 use alloc::vec::Vec;
 
 use heuristic_search::{Cost, Limits, Successors, astar, heuristic_fn};
 
+use self::landmarks::Landmarks;
 use self::lexicographic::Lexicographic;
 use crate::conflict_table::ConflictTable;
 use crate::constraint::ConstraintSet;
@@ -153,13 +158,13 @@ fn search<G: Graph, P: Pricing>(
 
     let space = SpaceTime::new(graph, agent, constraints, pricing);
     let earliest_finish = space.earliest_finish;
+    let landmarks = Landmarks::new(graph, constraints, distances, earliest_finish)?;
     let goal = |&(vertex, time): &State| vertex == agent.goal && time >= earliest_finish;
     let heuristic = heuristic_fn(|&(vertex, time): &State| {
-        let distance = distances[vertex]?;
+        let direct = distances[vertex]?.max(earliest_finish.saturating_sub(time));
+        let via = landmarks.estimate(vertex, time)?;
 
-        Some(P::estimate(
-            distance.max(earliest_finish.saturating_sub(time)),
-        ))
+        Some(P::estimate(direct.max(via)))
     });
 
     let result = astar(&space, (agent.start, 0), &goal, heuristic, Limits::NONE);

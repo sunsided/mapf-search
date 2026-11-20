@@ -3,8 +3,8 @@
 //! conflict-free and within its guarantee over the optimal sum of costs or makespan.
 
 use mapf_search::{
-    Agent, CbsConfig, CbsHeuristic, Grid, Instance, MStarConfig, Objective, Outcome, Vertex,
-    Weight, first_conflict,
+    Agent, CbsConfig, CbsHeuristic, Grid, Instance, MStarConfig, Objective, Outcome, Splitting,
+    Vertex, Weight, first_conflict,
 };
 use proptest::prelude::*;
 
@@ -135,11 +135,12 @@ proptest! {
         check(&grid, &agents, Solver::Cbs(CbsConfig::improved(Objective::Makespan)))?;
     }
 
-    /// Each improvement alone keeps CBS optimal, for both objectives.
+    /// Each improvement alone keeps CBS optimal, for both objectives, and so does bypass
+    /// with disjoint splitting.
     #[test]
     fn each_cbs_improvement_alone_matches_joint_search(
         (grid, agents) in instance(),
-        improvement in 0..4_usize,
+        improvement in 0..6_usize,
         makespan in any::<bool>(),
     ) {
         let objective = if makespan { Objective::Makespan } else { Objective::SumOfCosts };
@@ -148,7 +149,13 @@ proptest! {
             0 => config.prioritize_conflicts = true,
             1 => config.bypass = true,
             2 => config.heuristic = CbsHeuristic::Cg,
-            _ => config.conflict_avoidance = true,
+            3 => config.conflict_avoidance = true,
+            4 => config.splitting = Splitting::Disjoint,
+            _ => {
+                // Bypass adopts the several paths a positive child replans.
+                config.bypass = true;
+                config.splitting = Splitting::Disjoint;
+            }
         }
 
         check(&grid, &agents, Solver::Cbs(config))?;
