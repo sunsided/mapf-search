@@ -272,7 +272,8 @@ instead of 10 000 there.
 Its API fits without changes: `Successors` with a callback is the time-expanded adapter,
 `Goal` and `Heuristic` are closures, `Cost = u32`, and `Outcome::Unsolvable` with the
 horizon is a proof. The crate depends on it through a path dependency on the sibling
-draft (`../heuristic-search`, branch `draft/initial`, at `58ba6ec` when this was last updated).
+draft (`../heuristic-search`, branch `draft/initial`, at `dbc85f8` when this was last
+updated).
 **The path dependency must become a crates.io version before `mapf-search` is published.**
 
 The CBS high level reuses heuristic-search's `Budget`, `Limits` and `Stats` for its own
@@ -429,9 +430,11 @@ swap where CBS and ICTS only hit their budget.
   costs this is `f` again. For makespan it steers the search through its plateaus: an agent
   with slack can wander without raising `f`.
 
-Optimality follows Wagner and Choset: a group's optimal joint path is the group's
+Optimality for sum of costs is Wagner and Choset's result, which is stated for a joint
+cost that sums the robots' costs. For makespan this crate relies on its own argument,
+backed by tests rather than the paper: a group's optimal joint path is the group's
 policy, and two groups that never collide combine into an optimal path of their union,
-for sum of costs (a sum) and makespan (a maximum). The oracle properties check both
+because the union's makespan is the maximum of theirs. The oracle properties check both
 forms and both objectives; a cross-check compares rM* with CBS on 5-6 agents, and a
 hand-made case with two separate pairs checks that rM* expands fewer states.
 
@@ -441,12 +444,19 @@ rM* about 50 ms (5 000 expansions over all planners, against 550 expansions with
 cost). Makespan is much slower for both forms (rM* takes over a minute on that instance)
 because of the plateaus; it is supported, not fast.
 
-**Not done: ODrM\*** (operator decomposition, Wagner and Choset 2015, section 6). OD
-replaces the full branching of a group by one agent at a time, through intermediate
-states that have their own collision sets and predecessor sets. That doubles the state
-types in the planner and changes how collision sets pass back through intermediate states,
-for a constant-factor gain in the case rM* already confines to the smallest groups. Left
-for later; see the open questions in the report.
+**Not attempted: ODrM\*** (operator decomposition). OD replaces the full branching of a
+group, one step with `b^k` successors, by `k` steps of `b` successors each, through
+intermediate states where only some agents have moved. That is exactly the cost behind
+basic M*'s 250 000 generated states on the benchmark, so the gain can be large. The
+obstacles, which is why it is left for later:
+
+- intermediate states need their own collision sets and predecessor sets, and collisions
+  found between an agent and the agents already moved in the same step must pass back
+  through them;
+- a subgroup that follows its own optimal joint path is defined at standard states, so
+  mixing it with intermediate states needs a rule for which agents of a group have moved;
+- for makespan, a joint step costs 1 if any agent pays, which does not split over the
+  agents of an operator-decomposed step without making `g` depend on the agent order.
 
 ## Later algorithms
 
@@ -498,8 +508,10 @@ lower bound on 4-connected grids. Moves stay 4-connected, as in the MAPF benchma
   prices SoC with goal-stay exactly, including waits at the goal before leaving. For
   makespan, a joint step costs 1 if any agent pays.
 - **Properties** (proptest, case count fixed in code), for every solver behind one
-  `Solver` enum in the tests: plain and improved CBS, each CBS improvement alone, ECBS at
-  `w = 1` and at `w` in {1.1, 1.5, 2, 3}, ICTS, M* and PBS, each for both objectives. When
+  `Solver` enum in the tests: plain and improved CBS (also with WDG), each CBS
+  improvement alone (plus bypass and WDG each with disjoint splitting), ECBS at `w = 1`
+  and at `w` in {1.1, 1.5, 2, 3}, ICTS, basic and recursive M* and PBS, each for both
+  objectives. When
   the oracle finds an optimum, a solved plan must pass the plan checker and be within the
   solver's guarantee: equal for the optimal solvers, at most `w` times for ECBS, at least
   the optimum for PBS. When the oracle proves the instance unsolvable, no solver returns
@@ -507,11 +519,18 @@ lower bound on 4-connected grids. Moves stay 4-connected, as in the MAPF benchma
   1 in 600 random solvable instances needs more than the 20 000 expansions the property
   test allows (plain CBS blows up on tightly coupled agents); those cases are discarded, and
   one of them (63 000 expansions for plain CBS, about 740 improved) is kept as a
-  regression test. Each property passed 1 500 cases once in release mode.
+  regression test. Each property passed 1 500 cases once in release mode (at `8290dab`,
+  and the WDG ones and the each-improvement one again at `08a75a1`), as did the
+  crate-internal heuristic admissibility property.
 - **Cross-checks** on random 4x4 to 5x5 grids with 3-4 agents, too large for the oracle:
-  improved CBS, ICTS and M* agree on the sum of costs whenever they solve, ECBS and PBS
-  respect their guarantees relative to it, no solver claims `Unsolvable` while another
-  solves, and every plan passes the plan checker (1 500 cases once in release mode).
+  improved CBS, ICTS, basic and recursive M* agree on the optimum (either objective)
+  whenever they solve, ECBS and PBS respect their guarantees relative to it, no solver
+  claims `Unsolvable` while another solves, and every plan passes the plan checker (300
+  cases once in release mode; at 1 500 cases, makespan basic M* makes it take well over
+  half an hour). A second cross-check runs improved CBS against recursive M* with 5-6
+  agents on 5x5 to 6x6 grids, for both objectives (1 500 cases once in release mode). In
+  a sample of 200 cases both solved, and so were compared, in 59 of 100 sum-of-costs
+  cases and 65 of 100 makespan cases.
 - **Hand-made cases for every solver:** an agent that steps off its goal, an agent passing
   through a finished agent's goal, an unreachable goal (`Unsolvable`), and a corridor swap
   (never `Solved`; M* proves it `Unsolvable`).
@@ -523,8 +542,14 @@ lower bound on 4-connected grids. Moves stay 4-connected, as in the MAPF benchma
   instance, checked by the oracle's plan checker.
 - **Benchmark:** `benches/solvers.rs` (criterion, as in heuristic-search) runs every
   solver on one fixed 8x8 instance with eight agents. All optimal solvers find sum of
-  costs 92. Typical times: CBS 0.3 ms plain and 0.4 ms improved, ECBS 0.4 ms, PBS
-  0.3 ms, ICTS 1.3 ms, basic M* 320 ms, recursive M* 50 ms.
+  costs 92. Typical times on an idle machine, before DG, disjoint splitting and the
+  conflict avoidance table: CBS 0.3 ms plain and 0.4 ms improved, ECBS 0.4 ms, PBS
+  0.3 ms, ICTS 1.3 ms, basic M* 320 ms; recursive M* is about ten times faster than
+  basic M*. Later wall times were too noisy (the machine was shared), so the newer
+  changes were measured in instructions (cachegrind): improved CBS now needs 6 instead
+  of 8 expansions on this instance but about a third more instructions per run (the
+  conflict table and the DG checks cost more than the two expansions save), while on the
+  hard 3x3 instance it needs 590 instead of 7 000 expansions.
 - **Later:** real Moving AI instances with known optimal SoC from published results, as
   slow ignored tests (the benchmark files are not vendored).
 
@@ -551,7 +576,9 @@ a generic `Lexicographic<A, B>` in search-core or heuristic-search would replace
 
 Milestones 3 to 5 were developed against an export of heuristic-search's `b5cc485`,
 because its working tree was mid-change and did not compile at the time. The final checks
-ran against the path dependency at `58ba6ec`.
+ran against the path dependency at `58ba6ec`. Disjoint splitting and DG/WDG were developed
+against an export of its `2d1f1ba` for the same reason; everything since was checked
+against the path dependency at `dbc85f8`.
 
 ### Secondary tie-break: a lexicographic cost
 
