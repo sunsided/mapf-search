@@ -139,7 +139,7 @@ conflicts with other agents' paths, Sharon et al. 2015) needs a secondary key; s
 Its API fits without changes: `Successors` with a callback is the time-expanded adapter,
 `Goal` and `Heuristic` are closures, `Cost = u32`, and `Outcome::Unsolvable` with the
 horizon is a proof. The crate depends on it through a path dependency on the sibling
-draft (`../heuristic-search`, branch `draft/initial`, at `16d2c7e` when this was written).
+draft (`../heuristic-search`, branch `draft/initial`, at `60d01f4` when this was last updated).
 **The path dependency must become a crates.io version before `mapf-search` is published.**
 
 The CBS high level reuses heuristic-search's `Budget`, `Limits` and `Stats` for its own
@@ -223,18 +223,98 @@ so it stays `no_std` with `alloc`; reading files is the caller's job. Milestone 
 
 ## Cross-crate needs
 
-Non-blocking for milestone 1; heuristic-search's API covers it as is.
+None blocks the milestones done so far; heuristic-search's API (as of `60d01f4`) covers
+them. The two API additions below belong in heuristic-search, not here. This crate will
+not implement them locally.
 
-- **heuristic-search: secondary tie-break key.** CBS's conflict avoidance table and ECBS's
-  low level need ties on `f` broken by a caller-supplied value (number of conflicts). The
-  engine's order is fixed (`g` larger first, then FIFO).
-- **heuristic-search: focal search.** ECBS needs a focal list (`f <= w * f_min`, ordered by
-  a second heuristic) at the low level. Could be a `focal_search` there, or local here.
-- **heuristic-search: reuse across calls.** CBS calls the low level thousands of times;
-  each call allocates a fresh search space and open list. A reusable search context would
-  save allocations. Measure first.
-- **heuristic-search: publish.** The path dependency must become a crates.io version
-  before this crate is published.
+### Secondary tie-break: a lexicographic cost
+
+CBS breaks low-level ties with a conflict avoidance table (CAT): among the cheapest paths,
+prefer the one with the fewest conflicts with other agents' current paths (Sharon et al.
+2015). The conflict count accumulates along the path, like a cost, so a state-only
+tie-break key is not enough: two paths to the same `(vertex, time)` with equal `g` but
+different conflict counts must be treated as an improvement, or the search returns a
+path with more conflicts than necessary. A lexicographic cost type does exactly that,
+with no engine change:
+
+```rust
+/// A cost compared lexicographically: `primary` first, then `secondary`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct Lexicographic<A, B> {
+    pub primary: A,
+    pub secondary: B,
+}
+
+impl<A: Cost, B: Cost> Cost for Lexicographic<A, B> {
+    const ZERO: Self = Self { primary: A::ZERO, secondary: B::ZERO };
+    /// `primary.cmp_cost`, then `secondary.cmp_cost`.
+    fn cmp_cost(&self, other: &Self) -> Ordering;
+    /// Component-wise.
+    fn times(self, factor: u32) -> Self;
+    /// Component-wise.
+    fn saturating_add(self, other: Self) -> Self;
+}
+// plus `Add` component-wise.
+```
+
+Here, the low level would use `Successors<Cost = Lexicographic<u32, u32>>` with edge cost
+`(1, conflicts_with_cat(from, to, t))` and a heuristic `(dist, 0)`. A* then returns a
+cost-optimal path with the fewest CAT conflicts among the cost-optimal ones. The engine's
+existing "larger `g` first" tie-break compares the whole lexicographic `g`. That is fine.
+A primary-only comparison would also be acceptable; the docs should say which one it is.
+
+### Focal search
+
+ECBS (Barer et al. 2014) runs focal search at both levels. The low level needs:
+
+```rust
+/// A secondary cost that orders the focal list; summed along the path like a cost.
+pub trait FocalCost<S> {
+    /// The secondary cost of the edge `from -> to`, e.g. the number of conflicts it causes.
+    fn edge(&mut self, from: &S, to: &S) -> u32;
+}
+
+/// Focal search: expands, among open states with `f <= w * f_min`, the one with the
+/// smallest accumulated focal cost (ties: smaller `f`, then larger `g`, then FIFO).
+/// Returns a path that costs at most `w` times the optimum.
+pub fn focal_search<G, T, H, F>(
+    graph: &G,
+    start: G::State,
+    goal: &T,
+    heuristic: H,
+    focal: F,
+    weight: Weight,
+    budget: impl Budget,
+) -> FocalResult<G>
+where
+    G: Successors,
+    G::State: Clone + Hash + Eq,
+    G::Action: Clone,
+    T: Goal<G::State> + ?Sized,
+    H: Heuristic<G::State, G::Cost>,
+    F: FocalCost<G::State>;
+
+/// A `GraphResult` plus the bound ECBS's high level needs.
+pub struct FocalResult<G: Successors> {
+    pub result: GraphResult<G>,
+    /// `f_min` of the open list when the search ended: a lower bound on the optimal cost.
+    /// It is `None` when the open list is empty.
+    pub lower_bound: Option<G::Cost>,
+}
+```
+
+`lower_bound` is essential: ECBS's high-level bound is the sum of the agents' `f_min`
+values, not their path costs. `Weight` is the existing rational weight. The ECBS high level
+is local to this crate.
+
+### Other needs
+
+- **Reuse across calls.** CBS calls the low level thousands of times, and each call
+  allocates a fresh search space and open list. A reusable search context would save
+  those allocations. Measure first.
+- **Publish.** The path dependency must become a crates.io version before this crate is
+  published. `Budget`, `Limits` and `Stats` are re-exported, so heuristic-search is a
+  public dependency.
 
 ## References
 

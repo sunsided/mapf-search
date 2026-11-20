@@ -9,7 +9,7 @@
 
 use alloc::vec::Vec;
 
-use heuristic_search::{Limits, Successors, astar};
+use heuristic_search::{Limits, Successors, astar, heuristic_fn};
 
 use crate::constraint::ConstraintSet;
 use crate::graph::{Graph, Vertex, distances_to};
@@ -68,13 +68,13 @@ pub(crate) fn plan<G: Graph>(
     let space = SpaceTime::new(graph, constraints);
     let earliest_finish = constraints.blocked_until(agent.goal).map_or(0, |t| t + 1);
     let goal = |&(vertex, time): &State| vertex == agent.goal && time >= earliest_finish;
-    let heuristic = |&(vertex, time): &State| {
+    let heuristic = heuristic_fn(|&(vertex, time): &State| {
         let distance = distances[vertex]?;
 
         Some(distance.max(earliest_finish.saturating_sub(time)))
-    };
+    });
 
-    let result = astar(&space, (agent.start, 0), &goal, &heuristic, Limits::NONE);
+    let result = astar(&space, (agent.start, 0), &goal, heuristic, Limits::NONE);
     let solution = result.into_solution()?;
 
     Some(
