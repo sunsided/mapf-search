@@ -1,7 +1,8 @@
 //! Conflict-based search ([`cbs`], Sharon et al. 2015): optimal for sum of costs or for
-//! makespan ([`Objective`]), with the ICBS improvements (Boyarski et al. 2015), the CG
-//! heuristic (Felner et al. 2018) and a conflict avoidance table (Sharon et al. 2015), each
-//! switchable in [`CbsConfig`].
+//! makespan ([`Objective`]), with the ICBS improvements (Boyarski et al. 2015), the CG,
+//! DG and WDG heuristics (Felner et al. 2018, Li et al. 2019), disjoint splitting (Li et al.
+//! 2019) and a conflict avoidance table (Sharon et al. 2015), each switchable in
+//! [`CbsConfig`].
 //!
 //! The high level is a best-first search over a constraint tree. Each node holds
 //! constraints and one path per agent that is optimal under them; the node with the lowest
@@ -26,16 +27,21 @@
 //! ```
 
 mod cardinal;
+mod cover;
+mod heuristic;
+mod pairs;
 
-use alloc::collections::BinaryHeap;
+use alloc::collections::{BTreeMap, BinaryHeap};
 use alloc::rc::Rc;
 use alloc::vec;
 use alloc::vec::Vec;
+use core::cell::RefCell;
 use core::cmp::{Ordering, Reverse};
 
 use heuristic_search::{Budget, Stats};
 
-use self::cardinal::{Cardinality, cardinality, forced, vertex_cover_bound};
+use self::cardinal::{Cardinality, cardinality, forced};
+use self::heuristic::PairKey;
 use crate::conflict::{Conflict, conflicts};
 use crate::conflict_table::ConflictTable;
 use crate::constraint::{Constraint, ConstraintSet};
@@ -93,7 +99,7 @@ impl CbsConfig {
             prioritize_conflicts: true,
             bypass: true,
             splitting: Splitting::Disjoint,
-            heuristic: CbsHeuristic::Cg,
+            heuristic: CbsHeuristic::Dg,
             conflict_avoidance: true,
         }
     }
@@ -148,6 +154,13 @@ pub enum CbsHeuristic {
     /// CG (Felner et al. 2018): a lower bound on the minimum vertex cover of the graph of
     /// agents with cardinal conflicts.
     Cg,
+    /// DG (Li et al. 2019): the same over the graph of *dependent* agents, whose MDDs have
+    /// no conflict-free combination. At least CG.
+    Dg,
+    /// WDG (Li et al. 2019): the DG graph with each edge weighted by how much the pair's
+    /// sum of costs must rise, found by a small CBS over the pair (capped at 64
+    /// expansions, then a lower bound), and an edge-weighted vertex cover. At least DG.
+    Wdg,
 }
 
 /// Finds a conflict-free plan that is optimal for `objective` with conflict-based search,
@@ -185,7 +198,7 @@ pub fn cbs<G: Graph>(
 /// Finds a conflict-free plan that is optimal for `config.objective` with conflict-based
 /// search and the improvements `config` selects.
 ///
-/// Constraint-tree nodes are ordered by the objective (plus the CG heuristic, if on), then
+/// Constraint-tree nodes are ordered by the objective (plus the heuristic, if on), then
 /// by the other objective, then by the number of conflicts. For [`Objective::Makespan`],
 /// the solution has the optimal makespan; its sum of costs is low but not guaranteed
 /// minimal among all makespan-optimal plans, because each agent's path is still the
@@ -227,6 +240,7 @@ pub fn cbs_with<G: Graph>(
 }
 
 /// One constraint-tree node.
+#[derive(Clone)]
 struct Node {
     /// All constraints on the way from the root, on any agent.
     constraints: Vec<Constraint>,
@@ -244,7 +258,7 @@ struct Node {
     conflict: Option<Conflict>,
     /// The number of conflicts among [`Node::paths`]; a tie-breaker.
     conflict_count: usize,
-    /// The CG heuristic value; `0` if off.
+    /// The heuristic value ([`CbsConfig::heuristic`]); `0` if off.
     heuristic: u32,
 }
 
@@ -288,6 +302,8 @@ struct Search<'a, G> {
     distances: Vec<Vec<Option<u32>>>,
     /// The open nodes.
     open: BinaryHeap<Entry>,
+    /// WDG's pair weights by the pair's constraints; `None` for a pair without a joint plan.
+    pair_weights: RefCell<BTreeMap<PairKey, Option<u32>>>,
     /// Counters reported in [`MapfResult::stats`].
     stats: Stats,
 }
@@ -300,6 +316,7 @@ impl<'a, G: Graph> Search<'a, G> {
             config,
             distances: distance_tables(instance.graph(), instance.agents()),
             open: BinaryHeap::new(),
+            pair_weights: RefCell::new(BTreeMap::new()),
             stats: Stats::default(),
         }
     }
@@ -311,6 +328,12 @@ impl<'a, G: Graph> Search<'a, G> {
         };
 
         self.push(root);
+
+        self.run_open(budget)
+    }
+
+    /// Pops and expands open nodes until a solution, the budget or an empty open list.
+    fn run_open(&mut self, budget: &mut impl Budget<Stats>) -> Outcome {
         while let Some(Entry { node, .. }) = self.open.pop() {
             let Some(conflict) = node.conflict else {
                 return Outcome::Solved(Solution::new(node.paths));
@@ -337,7 +360,7 @@ impl<'a, G: Graph> Search<'a, G> {
             paths.push(path);
         }
 
-        Some(self.node(Vec::new(), paths, vec![None; agents]))
+        self.node(Vec::new(), paths, vec![None; agents])
     }
 
     /// Splits `conflict` of `parent`: bypasses it if a child allows, else opens the
@@ -353,8 +376,10 @@ impl<'a, G: Graph> Search<'a, G> {
 
         if self.config.bypass {
             if let Some(child) = children.iter().find(|child| is_bypass(&parent, child)) {
-                let adopted = self.adopt(parent, child);
-                self.push(adopted);
+                if let Some(adopted) = self.adopt(parent, child) {
+                    self.push(adopted);
+                }
+
                 return;
             }
         }
@@ -373,8 +398,9 @@ impl<'a, G: Graph> Search<'a, G> {
     }
 
     /// `parent` with the paths of the agents `child` replanned, which satisfy the parent's
-    /// constraints at the same costs, so their MDDs stay valid.
-    fn adopt(&self, parent: Node, child: &Child) -> Node {
+    /// constraints at the same costs, so their MDDs stay valid. `None` if the heuristic
+    /// proves that the node has no solution.
+    fn adopt(&self, parent: Node, child: &Child) -> Option<Node> {
         let mut paths = parent.paths;
         for &agent in &child.replanned {
             paths[agent].clone_from(&child.node.paths[agent]);
@@ -402,7 +428,7 @@ impl<'a, G: Graph> Search<'a, G> {
         }
 
         mdds[constraint.agent()] = None;
-        let node = self.node(constraints, paths, mdds);
+        let node = self.node(constraints, paths, mdds)?;
 
         Some(Child { node, replanned })
     }
@@ -425,21 +451,24 @@ impl<'a, G: Graph> Search<'a, G> {
 
     /// A node with `constraints`, `paths` and the known `mdds`: computes its costs, its
     /// conflicts, the missing MDDs it needs, the conflict to split and the heuristic.
+    /// `None` if the heuristic proves that the node has no solution.
     fn node(
         &self,
         constraints: Vec<Constraint>,
         paths: Vec<Path>,
         mut mdds: Vec<Option<Rc<Mdd>>>,
-    ) -> Node {
+    ) -> Option<Node> {
         let found = conflicts(&paths);
         let (conflict, heuristic) = if self.config.needs_mdds() {
             self.fill_mdds(&constraints, &paths, &mut mdds, &found);
-            self.classify(&found, &mdds)
+            let classes: Vec<Cardinality> = found.iter().map(|c| cardinality(c, &mdds)).collect();
+            let heuristic = self.heuristic(&constraints, &paths, &found, &classes, &mdds)?;
+            (self.choose(&found, &classes), heuristic)
         } else {
             (found.first().copied(), 0)
         };
 
-        Node {
+        Some(Node {
             sum_of_costs: sum_of_costs(&paths),
             makespan: makespan(&paths),
             conflict,
@@ -448,7 +477,7 @@ impl<'a, G: Graph> Search<'a, G> {
             constraints,
             paths,
             mdds,
-        }
+        })
     }
 
     /// Builds the missing MDDs of the agents in `found`.
@@ -480,35 +509,20 @@ impl<'a, G: Graph> Search<'a, G> {
         }
     }
 
-    /// The conflict to split (the earliest of the most cardinal class, if prioritizing,
-    /// else the earliest) and the CG heuristic value.
-    fn classify(&self, found: &[Conflict], mdds: &[Option<Rc<Mdd>>]) -> (Option<Conflict>, u32) {
-        let classes: Vec<Cardinality> = found.iter().map(|c| cardinality(c, mdds)).collect();
+    /// The conflict to split among `found`, whose cardinalities are `classes`: the earliest
+    /// of the most cardinal class if prioritizing, else the earliest.
+    fn choose(&self, found: &[Conflict], classes: &[Cardinality]) -> Option<Conflict> {
+        if !self.config.prioritize_conflicts {
+            return found.first().copied();
+        }
 
-        let conflict = if self.config.prioritize_conflicts {
-            let best = classes.iter().max();
-            best.and_then(|best| found.iter().zip(&classes).find(|(_, class)| *class == best))
-                .map(|(conflict, _)| *conflict)
-        } else {
-            found.first().copied()
-        };
+        let best = classes.iter().max()?;
 
-        let heuristic = if self.config.uses_heuristic() {
-            let mut edges: Vec<(AgentId, AgentId)> = found
-                .iter()
-                .zip(&classes)
-                .filter(|(_, class)| **class == Cardinality::Cardinal)
-                .map(|(conflict, _)| conflict.agents())
-                .collect();
-            edges.sort_unstable();
-            edges.dedup();
-
-            vertex_cover_bound(&edges)
-        } else {
-            0
-        };
-
-        (conflict, heuristic)
+        found
+            .iter()
+            .zip(classes)
+            .find(|(_, class)| *class == best)
+            .map(|(conflict, _)| *conflict)
     }
 
     /// Opens `node`.
@@ -645,8 +659,17 @@ mod tests {
         let improved = Search::new(&any, CbsConfig::improved(Objective::SumOfCosts));
         let plain = Search::new(&any, CbsConfig::plain(Objective::SumOfCosts));
 
-        assert_eq!(improved.classify(&[wide, forced], &mdds), (Some(forced), 1));
-        assert_eq!(plain.classify(&[wide, forced], &mdds), (Some(wide), 0));
+        let found = [wide, forced];
+        let classes = found.map(|conflict| cardinality(&conflict, &mdds));
+        let heuristic = |search: &Search<'_, Grid>| {
+            let (constraints, paths) = (Vec::new(), Vec::new());
+            search.heuristic(&constraints, &paths, &found, &classes, &mdds)
+        };
+
+        assert_eq!(improved.choose(&found, &classes), Some(forced));
+        assert_eq!(heuristic(&improved), Some(1));
+        assert_eq!(plain.choose(&found, &classes), Some(wide));
+        assert_eq!(heuristic(&plain), Some(0));
     }
 
     /// Bypass: on a free 3x3 grid, two agents crossing diagonally meet at a vertex both

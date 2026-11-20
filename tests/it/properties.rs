@@ -140,7 +140,7 @@ proptest! {
     #[test]
     fn each_cbs_improvement_alone_matches_joint_search(
         (grid, agents) in instance(),
-        improvement in 0..6_usize,
+        improvement in 0..8_usize,
         makespan in any::<bool>(),
     ) {
         let objective = if makespan { Objective::Makespan } else { Objective::SumOfCosts };
@@ -151,6 +151,8 @@ proptest! {
             2 => config.heuristic = CbsHeuristic::Cg,
             3 => config.conflict_avoidance = true,
             4 => config.splitting = Splitting::Disjoint,
+            5 => config.heuristic = CbsHeuristic::Dg,
+            6 => config.heuristic = CbsHeuristic::Wdg,
             _ => {
                 // Bypass adopts the several paths a positive child replans.
                 config.bypass = true;

@@ -3,8 +3,8 @@
 
 use heuristic_search::Limits;
 use mapf_search::{
-    AdjacencyList, Agent, CbsConfig, Conflict, Constraint, ConstraintSet, Grid, Instance,
-    InstanceError, MStarConfig, Objective, Outcome, Splitting, cbs, cbs_with, conflicts,
+    AdjacencyList, Agent, CbsConfig, CbsHeuristic, Conflict, Constraint, ConstraintSet, Grid,
+    Instance, InstanceError, MStarConfig, Objective, Outcome, Splitting, cbs, cbs_with, conflicts,
     first_conflict, mstar_with, space_time_astar,
 };
 
@@ -244,6 +244,35 @@ fn improved_cbs_solves_the_hard_instance() {
         result.stats,
         without.stats
     );
+}
+
+/// On [`hard_instance`], each stronger heuristic needs fewer expansions than the one
+/// before: none, CG, DG, WDG (with every other improvement of improved CBS). All are
+/// optimal.
+#[test]
+fn stronger_heuristics_need_fewer_expansions() {
+    let (grid, agents) = hard_instance();
+    let instance = Instance::new(grid.clone(), agents.clone()).expect("valid");
+
+    let expansions = [
+        CbsHeuristic::None,
+        CbsHeuristic::Cg,
+        CbsHeuristic::Dg,
+        CbsHeuristic::Wdg,
+    ]
+    .map(|heuristic| {
+        let config = CbsConfig {
+            heuristic,
+            ..CbsConfig::improved(Objective::SumOfCosts)
+        };
+        let result = cbs_with(&instance, config, Limits::expansions(200_000));
+        let solution = result.solution().expect("solvable");
+        assert_eq!(assert_valid_plan(&grid, &agents, &solution.paths).0, 19);
+
+        result.stats.expanded
+    });
+
+    assert!(expansions.is_sorted_by(|a, b| a > b), "{expansions:?}");
 }
 
 /// A positive constraint makes the low level detour through the required vertex, and a

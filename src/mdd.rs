@@ -2,10 +2,13 @@
 //! exactly a given time under its constraints, layered by time.
 //!
 //! CBS uses them to classify conflicts as cardinal, semi-cardinal or non-cardinal
-//! (Boyarski et al. 2015); ICTS searches their cross product (Sharon et al. 2013).
+//! (Boyarski et al. 2015) and agents as dependent (Li et al. 2019); ICTS searches their
+//! cross product (Sharon et al. 2013). Both cross-product searches use [`joint_paths`].
 //!
 //! Goal-stay semantics: after its last level the agent stays at its goal forever, so every
 //! level past [`Mdd::depth`] is the singleton goal ([`Mdd::level`]).
+
+mod joint;
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -14,6 +17,8 @@ use crate::constraint::ConstraintSet;
 use crate::graph::{Graph, Vertex};
 use crate::instance::Agent;
 use crate::path::Time;
+
+pub(crate) use self::joint::joint_paths;
 
 /// All paths of one agent from its start at time `0` to its goal at time [`Mdd::depth`] that
 /// satisfy its constraints, as a layered graph.

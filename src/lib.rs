@@ -10,7 +10,8 @@
 //! swap vertices along an edge.
 //!
 //! - [`cbs()`]: conflict-based search, optimal for [`sum_of_costs`] or [`makespan`]
-//!   ([`Objective`]), with prioritized conflicts, bypass, the CG heuristic, a conflict
+//!   ([`Objective`]), with prioritized conflicts, bypass, the CG, DG or WDG heuristic
+//!   ([`CbsHeuristic`]), a conflict
 //!   avoidance table and disjoint [`Splitting`]; [`cbs_with`] and [`CbsConfig`] switch
 //!   them individually.
 //! - [`ecbs`]: enhanced CBS, bounded-suboptimal within a [`Weight`] `w`, with focal search
@@ -55,7 +56,7 @@
 //!
 //! ## Planned scope
 //!
-//! - Conflict-based: CBS-TA, and more CBS improvements (DG/WDG heuristics)
+//! - Conflict-based: CBS-TA
 //! - Local repair: MAPF-LNS2
 //! - Partial expansion: EPEA*
 //!

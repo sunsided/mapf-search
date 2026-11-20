@@ -1,4 +1,4 @@
-//! ICTS's low level: a depth-first search of the cross product of some agents' MDDs for a
+//! A depth-first search of the cross product of some agents' MDDs for a
 //! conflict-free combination ([`joint_paths`]).
 //!
 //! Every agent's MDD may have a different depth; an agent past its depth stays at its goal,
@@ -14,7 +14,7 @@ use crate::path::{Path, Time};
 /// One path per MDD in `mdds`, each from its MDD, that together have no vertex conflict and
 /// no swap, or `None` if no such combination exists. The paths end at their goals without
 /// trailing waits.
-pub(super) fn joint_paths(mdds: &[&Mdd]) -> Option<Vec<Path>> {
+pub(crate) fn joint_paths(mdds: &[&Mdd]) -> Option<Vec<Path>> {
     let depth = mdds.iter().map(|mdd| mdd.depth()).max().unwrap_or(0);
     let mut search = Search {
         mdds,

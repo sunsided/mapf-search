@@ -200,7 +200,7 @@ impl Constraint {
 }
 
 /// The constraints of one agent, indexed for the checks of a space-time search.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ConstraintSet {
     /// Forbidden `(time, vertex)` pairs.
     vertices: BTreeSet<(Time, Vertex)>,

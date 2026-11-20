@@ -167,6 +167,33 @@ objective value of the result.
   lower bound) and searches exactly up to size 12, which is exponential in the size. Above
   that it returns the largest size proven necessary. A greedy *cover* would overestimate
   and break optimality. Admissible for sum of costs only, so it is off for makespan.
+- **DG and WDG heuristics** (Li et al. 2019, `CbsHeuristic::Dg` and `::Wdg`; `cbs` uses
+  DG). Over the node's conflicting pairs (`cbs/heuristic.rs`):
+  - DG: an edge for every *dependent* pair, whose MDDs at their current costs have no
+    conflict-free combination (`mdd::joint_paths`, the joint search ICTS also uses). A
+    cardinal conflict implies dependence, so the MDD product is only searched otherwise.
+    The bound is the same vertex cover as CG's, over a superset of its edges.
+  - WDG: each DG edge weighted by `Δ = optimum of the pair alone under its constraints -
+    current costs`, at least 1 (`cbs/pairs.rs`: a best-first CBS over two agents with
+    standard splitting). The pair search can be infinite (a corridor swap), so it stops
+    after 64 expansions and returns the cost of its cheapest open node, a lower bound. If
+    its open list runs empty, the pair has no joint plan and the node is dropped. The bound
+    is a minimum edge-weighted vertex cover, `min sum x_i` with `x_a + x_b >= Δ_ab`
+    (`cbs/cover.rs`): exact per connected component by branch and bound while the product
+    of `1 + max weight` over its agents stays below 65 536, else the weight of a greedy
+    set of disjoint edges.
+  - Pair weights depend only on the two agents' constraint sets (implied ones included),
+    so they are cached by them for the whole run.
+  - Pairs without a conflict at the node count as independent. MDDs a positive child did
+    not rebuild may be too wide, which can only hide a dependence, so the bound stays
+    admissible.
+
+  Tests: a crate-internal property expands plain CBS (standard and disjoint splitting) on
+  random 3x3 grids and checks, at each node, CG <= DG <= WDG and `cost + WDG <=` the optimum
+  below the node (plain CBS from it); a WDG weight one too high fails it at once. On the
+  hard instance, improved CBS needs about 980 expansions without a heuristic, 740 with CG,
+  590 with DG and 370 with WDG. WDG's pair searches make it about three times slower than
+  DG there, so `cbs` uses DG.
 - **Disjoint splitting** (Li et al. 2019, `Splitting::Disjoint`). For a conflict of `a`
   and `b`, pick one agent `i`; one child gets the negative constraint on `i` (as in
   standard splitting), the other the positive one, which forbids the conflict to everyone
@@ -181,7 +208,7 @@ objective value of the result.
   makes conflicts look less cardinal, so the CG bound stays admissible.
 - On the hard 3x3 instance below, plain CBS needs about 73 000 expansions (63 000 since
   the low level's tie-breaking changed), plain CBS with disjoint splitting about 1 200,
-  and with all improvements about 740 (7 000 with standard splitting).
+  and with all improvements about 590 (with CG: 740; 7 000 with standard splitting).
 
 **Duplicate handling.** A child never re-adds a constraint its parent already holds: the
 parent's paths satisfy all of its constraints, and the new constraint is violated by
@@ -491,8 +518,8 @@ lower bound on 4-connected grids. Moves stay 4-connected, as in the MAPF benchma
    detection, constraints, space-time A* via heuristic-search, optimal CBS for SoC, oracle
    and property tests.
 2. **Done in this draft.** Makespan-optimal CBS; Moving AI `.map`/`.scen` parser.
-3. **Done in this draft:** MDDs, prioritized conflicts, bypass, CG heuristic, conflict
-   avoidance table, disjoint splitting. Open: DG/WDG.
+3. **Done in this draft:** MDDs, prioritized conflicts, bypass, CG, DG and WDG
+   heuristics, conflict avoidance table, disjoint splitting.
 4. **Done in this draft:** ECBS (local focal list), PBS (with `block_from`).
 5. **Done in this draft:** ICTS (shares MDDs), basic and recursive M*, every solver for
    both objectives. Open: ODrM*.

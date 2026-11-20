@@ -25,20 +25,17 @@
 //!     grow --> pop
 //! ```
 
-mod joint;
-
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::rc::Rc;
 use alloc::vec::Vec;
 
 use heuristic_search::{Budget, Stats};
 
-use self::joint::joint_paths;
 use crate::constraint::ConstraintSet;
 use crate::graph::Graph;
 use crate::instance::{AgentId, Instance};
 use crate::low_level::distance_tables;
-use crate::mdd::Mdd;
+use crate::mdd::{Mdd, joint_paths};
 use crate::path::{Objective, Path, Time};
 use crate::solution::{MapfResult, Outcome, Solution};
 
