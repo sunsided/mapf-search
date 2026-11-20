@@ -74,6 +74,7 @@ extern crate alloc;
 
 mod cbs;
 mod conflict;
+mod conflict_table;
 mod constraint;
 mod ecbs;
 mod focal;

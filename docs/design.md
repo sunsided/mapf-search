@@ -228,8 +228,12 @@ most `w` times the optimum (see Objectives for makespan). `w` is heuristic-searc
   paths (vertex conflicts, swaps, agents parked at their goals), then `f`, then larger `g`.
   `g` is the time, so it never improves: no state is reopened, and `f_min` stays a valid
   lower bound. The search reports `f_min` at the pop of the goal as the agent's lower
-  bound. The horizon is the A* low level's. Not counted: future conflicts at the agent's
-  own goal after it finishes (the high level still resolves them).
+  bound. The horizon is the A* low level's. Finishing is a step of its own: from the goal,
+  once the agent may stay, a free step leads to a *finished* copy of the state, the only
+  goal state. Its focal key adds the conflicts the agent causes by staying: every later
+  visit of another agent to the goal, and another agent parking there later. The copy has
+  the same `f`, so the lower bound is unchanged. The counts come from a shared
+  `ConflictTable` (`conflict_table.rs`), also used by CBS's tie-break.
 - **High level.** A node's `f` is the sum of its agents' lower bounds; its value is its sum
   of costs; its focal key is the number of conflicting agent pairs, then the sum of costs.
   A child keeps the larger of its parent's and its own bound for the replanned agent; both

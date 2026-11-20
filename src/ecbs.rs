@@ -2,8 +2,9 @@
 //! makespan ([`Objective`]), with focal search at both levels.
 //!
 //! - **Low level:** each agent's path costs at most `w` times its cheapest path under its
-//!   constraints, preferring few conflicts with the other agents' current paths. The search
-//!   also reports `f_min`, a lower bound on that cheapest cost.
+//!   constraints, preferring few conflicts with the other agents' current paths, including
+//!   those it causes by staying at its goal after it finished. The search also reports
+//!   `f_min`, a lower bound on that cheapest cost.
 //! - **High level:** constraint-tree nodes are ordered by their lower bound: the sum of the
 //!   agents' bounds for sum of costs, their maximum for makespan. The focal sublist is
 //!   every node whose objective value is at most `w` times the smallest lower bound,
@@ -20,8 +21,9 @@ use alloc::vec::Vec;
 
 use heuristic_search::{Budget, Stats, Weight};
 
-use self::low_level::{ConflictTable, FocalPath, Problem, focal_plan};
+use self::low_level::{FocalPath, Problem, focal_plan};
 use crate::conflict::{Conflict, conflicts};
+use crate::conflict_table::ConflictTable;
 use crate::constraint::{Constraint, ConstraintSet};
 use crate::focal::FocalList;
 use crate::graph::Graph;
