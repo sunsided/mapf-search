@@ -2,6 +2,7 @@
 //! compare CBS with an independent joint-space search.
 
 mod cases;
+mod cross_check;
 mod movingai;
 mod oracle;
 mod properties;
