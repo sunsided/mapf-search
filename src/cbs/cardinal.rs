@@ -110,9 +110,88 @@ fn has_cover(edges: &[(AgentId, AgentId)], size: u32) -> bool {
 
 #[cfg(test)]
 mod tests {
-    //! Unit tests for the vertex cover bound.
+    //! Unit tests for conflict classification and the vertex cover bound.
 
     use super::*;
+    use crate::constraint::ConstraintSet;
+    use crate::graph::{Grid, distances_to};
+    use crate::instance::Agent;
+    use crate::path::Time;
+
+    /// The MDD of an agent from `start` to `goal` at `depth` on a free 3x2 grid:
+    ///
+    /// ```text
+    /// 0 1 2
+    /// 3 4 5
+    /// ```
+    fn mdd(start: usize, goal: usize, depth: Time) -> Rc<Mdd> {
+        let grid = Grid::new(3, 2);
+        let distances = distances_to(&grid, goal);
+        let agent = Agent { start, goal };
+        let mdd = Mdd::build(&grid, agent, &ConstraintSet::new(), &distances, depth);
+
+        Rc::new(mdd.expect("reachable"))
+    }
+
+    /// The MDDs of agents 0 and 1, as a node stores them.
+    fn pair(first: Rc<Mdd>, second: Rc<Mdd>) -> [Option<Rc<Mdd>>; 2] {
+        [Some(first), Some(second)]
+    }
+
+    /// A vertex conflict between agents 0 and 1 at `vertex` and `time`.
+    fn at(vertex: usize, time: Time) -> Conflict {
+        Conflict::Vertex {
+            agents: (0, 1),
+            vertex,
+            time,
+        }
+    }
+
+    /// Both, one or neither agent forced through the vertex.
+    #[test]
+    fn vertex_conflicts_by_mdd_width() {
+        // 0 -> 2 must pass 1 at time 1; 4 -> 1 must be at 1 at time 1.
+        let cardinal = pair(mdd(0, 2, 2), mdd(4, 1, 1));
+        assert_eq!(cardinality(&at(1, 1), &cardinal), Cardinality::Cardinal);
+
+        // 3 -> 1 passes 0 or 4 at time 1.
+        let semi = pair(mdd(0, 2, 2), mdd(3, 1, 2));
+        assert_eq!(cardinality(&at(1, 1), &semi), Cardinality::SemiCardinal);
+
+        // 0 -> 5 passes 1 or 3, 2 -> 3 passes 1 or 5 at time 1.
+        let neither = pair(mdd(0, 5, 3), mdd(2, 3, 3));
+        assert_eq!(cardinality(&at(1, 1), &neither), Cardinality::NonCardinal);
+    }
+
+    /// A swap is cardinal when both agents' MDDs are forced along the edge.
+    #[test]
+    fn swaps_by_mdd_width() {
+        let swap = Conflict::Edge {
+            agents: (0, 1),
+            from: 0,
+            to: 1,
+            time: 0,
+        };
+
+        assert_eq!(
+            cardinality(&swap, &pair(mdd(0, 1, 1), mdd(1, 0, 1))),
+            Cardinality::Cardinal
+        );
+        assert_eq!(
+            cardinality(&swap, &pair(mdd(0, 1, 1), mdd(1, 0, 3))),
+            Cardinality::SemiCardinal
+        );
+    }
+
+    /// Past its depth an agent sits at its goal, so a conflict there is forced for it.
+    #[test]
+    fn finished_agent_is_forced_at_its_goal() {
+        // Agent 0 finished at 1 at time 1; agent 1 is at its goal 3 at time 5.
+        let mdds = pair(mdd(0, 1, 1), mdd(2, 3, 3));
+
+        assert_eq!(cardinality(&at(1, 5), &mdds), Cardinality::SemiCardinal);
+        assert_eq!(cardinality(&at(0, 5), &mdds), Cardinality::NonCardinal);
+    }
 
     /// A triangle needs two vertices, a star one, a path of four edges two.
     #[test]

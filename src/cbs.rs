@@ -457,3 +457,100 @@ fn is_bypass(parent: &Node, child: &Node, agent: AgentId) -> bool {
     path_cost(&child.paths[agent]) == path_cost(&parent.paths[agent])
         && child.conflict_count < parent.conflict_count
 }
+
+#[cfg(test)]
+mod tests {
+    //! Unit tests for the CBS improvements on single nodes.
+
+    use super::*;
+    use crate::graph::Grid;
+    use crate::instance::Agent;
+
+    /// An agent's start and goal cell, as `(x, y)`.
+    type Route = ((usize, usize), (usize, usize));
+
+    /// An instance on `rows` with one agent per route.
+    fn instance(rows: &[&str], agents: &[Route]) -> Instance<Grid> {
+        let grid = Grid::parse(rows);
+        let agents = agents
+            .iter()
+            .map(|&((sx, sy), (gx, gy))| Agent {
+                start: grid.vertex(sx, sy),
+                goal: grid.vertex(gx, gy),
+            })
+            .collect();
+
+        Instance::new(grid, agents).expect("valid")
+    }
+
+    /// On a plus-shaped map both agents must cross the centre at time 1: one cardinal
+    /// conflict, so the CG heuristic is 1, and the node ranks one above its cost.
+    #[test]
+    fn crossing_on_a_plus_is_cardinal() {
+        let plus = instance(
+            &["@.@", "...", "@.@"],
+            &[((0, 1), (2, 1)), ((1, 0), (1, 2))],
+        );
+        let search = Search::new(&plus, CbsConfig::improved(Objective::SumOfCosts));
+        let root = search.root().expect("both reach their goals");
+
+        assert_eq!(root.heuristic, 1);
+        assert_eq!(root.sum_of_costs, 4);
+
+        let plain = Search::new(&plus, CbsConfig::plain(Objective::SumOfCosts));
+        assert_eq!(plain.root().expect("reachable").heuristic, 0);
+    }
+
+    /// Prioritizing picks a later cardinal conflict over an earlier non-cardinal one;
+    /// without it, the earliest conflict wins.
+    #[test]
+    fn prioritizing_prefers_cardinal_conflicts() {
+        // On a free 3x2 grid (`0 1 2` over `3 4 5`): agents 0 and 1 have two ways through
+        // time 1, agents 2 and 3 must be at vertex 1 at time 1.
+        let grid = Grid::new(3, 2);
+        let mdd = |start, goal, depth| {
+            let distances = crate::graph::distances_to(&grid, goal);
+            let agent = Agent { start, goal };
+            Mdd::build(&grid, agent, &ConstraintSet::new(), &distances, depth).map(Rc::new)
+        };
+        let mdds = [mdd(0, 5, 3), mdd(2, 3, 3), mdd(4, 1, 1), mdd(0, 2, 2)];
+        let at_one = |agents| Conflict::Vertex {
+            agents,
+            vertex: 1,
+            time: 1,
+        };
+        let (wide, forced) = (at_one((0, 1)), at_one((2, 3)));
+
+        let any = instance(&["..."], &[((0, 0), (2, 0))]);
+        let improved = Search::new(&any, CbsConfig::improved(Objective::SumOfCosts));
+        let plain = Search::new(&any, CbsConfig::plain(Objective::SumOfCosts));
+
+        assert_eq!(improved.classify(&[wide, forced], &mdds), (Some(forced), 1));
+        assert_eq!(plain.classify(&[wide, forced], &mdds), (Some(wide), 0));
+    }
+
+    /// Bypass: on a free 3x3 grid, two agents crossing diagonally meet at a vertex both
+    /// can avoid at no cost; the expansion takes over a child's paths instead of splitting.
+    #[test]
+    fn bypass_adopts_an_equally_cheap_child() {
+        let open = instance(
+            &["...", "...", "..."],
+            &[((0, 0), (2, 2)), ((2, 0), (0, 2))],
+        );
+        let mut config = CbsConfig::plain(Objective::SumOfCosts);
+        config.bypass = true;
+        let mut search = Search::new(&open, config);
+        let root = search.root().expect("reachable");
+        let conflict = root.conflict.expect("the diagonal paths meet");
+
+        search.expand(root, conflict);
+        let Entry { node, .. } = search.open.pop().expect("the adopted node");
+
+        assert!(search.open.is_empty(), "no children were opened");
+        assert!(
+            node.constraints.is_empty(),
+            "the parent keeps its constraints"
+        );
+        assert_eq!((node.sum_of_costs, node.conflict_count), (8, 0));
+    }
+}
