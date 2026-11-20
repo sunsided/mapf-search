@@ -60,7 +60,12 @@ fn grid(width: usize, height: usize, blocked: &[bool]) -> Grid {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(64))]
+    #![proptest_config(ProptestConfig {
+        cases: 64,
+        // Bounds the hard instances discarded below, so a CBS regression cannot hide there.
+        max_global_rejects: 8,
+        ..ProptestConfig::default()
+    })]
 
     /// CBS solves exactly the instances the oracle solves, with a valid, conflict-free plan
     /// of the optimal sum of costs.

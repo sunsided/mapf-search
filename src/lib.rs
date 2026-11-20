@@ -14,13 +14,15 @@
 //!   `heuristic-search` crate's A*.
 //! - [`first_conflict`] and [`conflicts`]: conflict detection on any set of paths.
 //!
+//! [`Budget`], [`Limits`] and [`Stats`] are re-exported from `heuristic-search`; they bound
+//! and count CBS's constraint-tree expansions.
+//!
 //! The crate is `no_std` and needs only `alloc`.
 //!
 //! ## Example
 //!
 //! ```
-//! use heuristic_search::Limits;
-//! use mapf_search::{Agent, Grid, Instance, cbs, first_conflict};
+//! use mapf_search::{Agent, Grid, Instance, Limits, cbs, first_conflict};
 //!
 //! // Two agents swap the ends of a corridor that has one side pocket.
 //! let grid = Grid::parse(&["...", "@.@"]);
@@ -74,6 +76,7 @@ pub use cbs::{CbsResult, Outcome, Solution, cbs};
 pub use conflict::{Conflict, conflicts, first_conflict};
 pub use constraint::{Constraint, ConstraintSet};
 pub use graph::{AdjacencyList, Graph, Grid, Vertex};
+pub use heuristic_search::{Budget, Limits, Stats};
 pub use instance::{Agent, AgentId, Instance, InstanceError};
 pub use low_level::space_time_astar;
 pub use path::{Path, Time, makespan, path_cost, position_at, sum_of_costs};

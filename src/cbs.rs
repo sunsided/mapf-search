@@ -79,14 +79,13 @@ impl CbsResult {
 /// Finds a sum-of-costs optimal conflict-free plan with conflict-based search.
 ///
 /// `budget` is asked before every constraint-tree expansion, with the counters described at
-/// [`CbsResult::stats`]; pass `heuristic_search::Limits::expansions(n)` to bound the run.
+/// [`CbsResult::stats`]; pass [`Limits::expansions`](crate::Limits::expansions) to bound the run.
 /// The low level runs to completion on every call.
 ///
 /// # Examples
 ///
 /// ```
-/// use heuristic_search::Limits;
-/// use mapf_search::{Agent, Grid, Instance, cbs};
+/// use mapf_search::{Agent, Grid, Instance, Limits, cbs};
 ///
 /// // Two agents cross on a plus-shaped map; one has to wait.
 /// let grid = Grid::parse(&["@.@", "...", "@.@"]);

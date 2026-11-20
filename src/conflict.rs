@@ -99,15 +99,25 @@ fn scan<P: AsRef<[Vertex]>>(paths: &[P], mut visit: impl FnMut(Conflict) -> bool
     let horizon = Time::try_from(horizon).expect("path lengths fit in u32 time steps");
 
     for time in 0..horizon {
-        for (i, a) in paths.iter().enumerate() {
-            for (j, b) in paths.iter().enumerate().skip(i + 1) {
-                let pair = conflicts_at(a, b, (i, j), time);
-                if pair.into_iter().flatten().any(|conflict| !visit(conflict)) {
-                    return;
-                }
+        if !scan_time(&paths, time, &mut visit) {
+            return;
+        }
+    }
+}
+
+/// Reports the conflicts at `time` (and swaps starting at `time`) between every pair of
+/// `paths` to `visit`. Returns `false` as soon as `visit` does.
+fn scan_time(paths: &[&[Vertex]], time: Time, visit: &mut impl FnMut(Conflict) -> bool) -> bool {
+    for (i, a) in paths.iter().enumerate() {
+        for (j, b) in paths.iter().enumerate().skip(i + 1) {
+            let pair = conflicts_at(a, b, (i, j), time);
+            if pair.into_iter().flatten().any(|conflict| !visit(conflict)) {
+                return false;
             }
         }
     }
+
+    true
 }
 
 /// The vertex conflict at `time` and the swap from `time` to `time + 1` between paths `a`

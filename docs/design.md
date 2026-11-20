@@ -65,7 +65,7 @@ The set also answers two summary questions the low level needs:
 
 - `latest_step()`: the last time step any constraint touches (an edge constraint at `t`
   touches `t + 1`); sets the search horizon;
-- `goal_blocked_until(goal)`: the latest time the goal vertex is forbidden; the agent may
+- `blocked_until(goal)`: the latest time the goal vertex is forbidden; the agent may
   not finish at or before it.
 
 Positive constraints (disjoint splitting, Li et al. 2019) and range constraints are
@@ -117,10 +117,10 @@ adapter that implements `Successors`:
 - **Successors** of `(v, t)`: wait `(v, t + 1)` and every edge `(u, t + 1)` for
   out-neighbours `u`, each at cost 1, minus those forbidden by a vertex constraint on
   `(target, t + 1)` or an edge constraint on `(v, target, t)`.
-- **Goal test** `v == goal && t > goal_blocked_until(goal)`: goal-stay means the agent
+- **Goal test** `v == goal && t > blocked_until(goal)`: goal-stay means the agent
   must not need to leave the goal after arriving, so it cannot arrive before the last
   vertex constraint on its goal.
-- **Heuristic** `h(v, t) = max(dist(v, goal), goal_blocked_until + 1 - t)`, where `dist`
+- **Heuristic** `h(v, t) = max(dist(v, goal), blocked_until(goal) + 1 - t)`, where `dist`
   is an exact backward BFS table per agent computed once per CBS run. `None` for
   vertices that cannot reach the goal, so they are dropped.
 - **Horizon.** The time-expanded graph is infinite, so A* alone would never report
@@ -143,7 +143,9 @@ draft (`../heuristic-search`, branch `draft/initial`, at `16d2c7e` when this was
 **The path dependency must become a crates.io version before `mapf-search` is published.**
 
 The CBS high level reuses heuristic-search's `Budget`, `Limits` and `Stats` for its own
-CT expansion counts, so callers limit both layers with the same types.
+CT expansion counts, so callers limit both layers with the same types. These types are
+re-exported, which makes heuristic-search a **public dependency**: its breaking releases
+are breaking releases of this crate.
 
 ## Later algorithms
 
@@ -184,8 +186,8 @@ Support the grid benchmarks of Stern et al. (2019), <https://movingai.com/benchm
   name, map width, map height, start x, start y, goal x, goal y, optimal single-agent
   length (octile; for 4-connected grids it is only a lower bound check).
 
-Instances take the first `k` agents of a scenario. The parser goes behind a `std`
-feature (it reads strings, not files, so it may stay `no_std` with `alloc`). Milestone 2.
+Instances take the first `k` agents of a scenario. The parser reads strings, not files,
+so it stays `no_std` with `alloc`; reading files is the caller's job. Milestone 2.
 
 ## Testing strategy
 
