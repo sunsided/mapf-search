@@ -556,14 +556,17 @@ lower bound on 4-connected grids. Moves stay 4-connected, as in the MAPF benchma
   and the WDG ones and the each-improvement one again at `08a75a1`), as did the
   crate-internal heuristic admissibility property.
 - **Cross-checks** on random 4x4 to 5x5 grids with 3-4 agents, too large for the oracle:
-  improved CBS, ICTS, basic and recursive M* agree on the optimum (either objective)
+  improved CBS, ICTS and every form of M* agree on the optimum (either objective)
   whenever they solve, ECBS and PBS respect their guarantees relative to it, no solver
-  claims `Unsolvable` while another solves, and every plan passes the plan checker (300
-  cases once in release mode; at 1 500 cases, makespan basic M* makes it take well over
-  half an hour). A second cross-check runs improved CBS against recursive M* with 5-6
-  agents on 5x5 to 6x6 grids, for both objectives (1 500 cases once in release mode). In
-  a sample of 200 cases both solved, and so were compared, in 59 of 100 sum-of-costs
-  cases and 65 of 100 makespan cases.
+  claims `Unsolvable` while another solves, and every plan passes the plan checker. Makespan
+  ICTS gets 100 cost vectors instead of 5 000 expansions: on an unsolvable instance its
+  run grows with the cube of the budget (1 000 vectors take 4 s), which, not M*, is what
+  made 1 500 cases take over half an hour before; now they take 30 s in release. A second
+  cross-check runs improved CBS against rM* and ODrM* with 5-6 agents on 5x5 to 6x6 grids,
+  for both objectives. In a sample of 200 cases both CBS and rM* solved, and so were
+  compared, in 59 of 100 sum-of-costs cases and 65 of 100 makespan cases. Both
+  cross-checks and the M* oracle property (every form, both objectives) passed 1 500
+  cases once in release mode at the commit that added operator decomposition.
 - **Hand-made cases for every solver:** an agent that steps off its goal, an agent passing
   through a finished agent's goal, an unreachable goal (`Unsolvable`), and a corridor swap
   (never `Solved`; M* proves it `Unsolvable`).

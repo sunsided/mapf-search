@@ -15,6 +15,11 @@ use crate::solvers::{Solver, assert_within};
 /// High-level expansions each solver may use.
 const BUDGET: u64 = 5_000;
 
+/// Cost vectors makespan ICTS may evaluate. Its `m`-th vector searches MDDs `m` levels
+/// deep, so on an unsolvable instance the run grows with the cube of the budget: 5 000
+/// vectors take minutes. 100 reaches far past any optimal makespan on these grids.
+const MAKESPAN_ICTS_BUDGET: u64 = 100;
+
 /// A random grid of `sides` by `sides` cells, about one cell in five blocked, with
 /// `agents` agents on distinct free starts and distinct free goals.
 fn instance(
@@ -57,7 +62,11 @@ fn instance(
 /// Runs `solver` and checks a plan, if any, with the independent plan checker.
 fn solve(grid: &Grid, agents: &[Agent], solver: Solver) -> Outcome {
     let instance = Instance::new(grid.clone(), agents.to_vec()).expect("valid by construction");
-    let outcome = solver.run(&instance, BUDGET).outcome;
+    let budget = match solver {
+        Solver::Icts(Objective::Makespan) => MAKESPAN_ICTS_BUDGET,
+        _ => BUDGET,
+    };
+    let outcome = solver.run(&instance, budget).outcome;
     if let Outcome::Solved(solution) = &outcome {
         let checked = assert_valid_plan(grid, agents, &solution.paths);
         assert_eq!(

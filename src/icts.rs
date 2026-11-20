@@ -46,7 +46,9 @@ use crate::solution::{MapfResult, Outcome, Solution};
 /// evaluated vectors in [`Stats::expanded`] and queued vectors (the root included) in
 /// [`Stats::generated`]. ICTS proves unsolvability only when an agent cannot reach its
 /// goal even alone; on other unsolvable instances the tree is infinite and the run ends at
-/// the budget.
+/// the budget. For makespan, the `m`-th vector searches MDDs about `m` levels deep, so such
+/// a run costs roughly the cube of the budget; keep makespan budgets small (a few hundred
+/// vectors take seconds).
 ///
 /// For [`Objective::Makespan`] the plan's sum of costs is low but not guaranteed minimal
 /// among the makespan-optimal plans: the joint MDD search returns the first combination it
