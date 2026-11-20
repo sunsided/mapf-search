@@ -395,8 +395,10 @@ swap where CBS and ICTS only hit their budget.
 
 ### Recursive M* (rM*)
 
-`mstar` runs recursive M*; `mstar_with(instance, MStarConfig, budget)` selects basic M*
-(`MStarConfig::basic`) or rM* (`MStarConfig::recursive`). Both share one planner
+`mstar` runs ODrM* (recursive M* with operator decomposition, below; also
+`MStarConfig::default()`); `mstar_with(instance, MStarConfig, budget)` selects basic M*
+(`MStarConfig::basic`), rM* (`MStarConfig::recursive`) or either with operator
+decomposition. All share one planner
 (`mstar/planner.rs`); they differ only in how collision sets merge and what a group does:
 
 - **Collision sets** (`mstar/collision.rs`) are disjoint groups of agents. A collision
@@ -462,8 +464,9 @@ on easy instances it is two to three times slower (every agent of a branching st
 an expansion), on one of the random instances it needs over 2 million expansions where
 rM* needs 112 000, and on the benchmark its subgroup searches form different, larger
 groups (five agents queried 24 times) than rM*'s. Applying OD only in the top-level
-planner removes the slowdown and the gain alike. So `mstar` keeps rM*, and ODrM* is
-opt-in (see the open questions).
+planner removes the slowdown and the gain alike. `mstar` and `MStarConfig::default()`
+use ODrM* anyway (the user's decision, for the large wins on coupled groups); rM* stays
+one `MStarConfig::recursive` away, and is the better choice on the benchmark.
 
 ### Makespan
 

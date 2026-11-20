@@ -53,6 +53,8 @@ fn main() {
         ("mstar basic", &|| {
             mstar_with(&instance, MStarConfig::basic(soc), budget())
         }),
+        // ODrM*, what `mstar` uses, needs about 12 s and 5.4 million expansions here (see
+        // docs/design.md), too slow for this benchmark; its rM* form is measured instead.
         ("mstar recursive", &|| {
             mstar_with(&instance, MStarConfig::recursive(soc), budget())
         }),

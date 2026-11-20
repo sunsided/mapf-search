@@ -40,8 +40,9 @@ Nothing is published yet, but code written against earlier states of this branch
 - **Every solver takes an `Objective`**: `ecbs(instance, objective, weight, budget)`,
   `pbs(instance, objective, budget)`, `icts(instance, objective, budget)` and
   `mstar(instance, objective, budget)`.
-- **`mstar` runs recursive M\***; `mstar_with` and `MStarConfig` (now with
-  `operator_decomposition`) select the other forms.
+- **`mstar` runs recursive M\* with operator decomposition (ODrM\*)**, as does
+  `MStarConfig::default()` (for sum of costs); `mstar_with` and `MStarConfig` (now with
+  `operator_decomposition`) select basic M*, rM* and OD-M*.
 - **`CbsConfig`**: `cardinal_heuristic: bool` became `heuristic: CbsHeuristic` (`None`,
   `Cg`, `Dg`, `Wdg`), and the struct gained `splitting: Splitting` and
   `conflict_avoidance: bool`. `CbsConfig::improved` (what `cbs` uses) now means DG,

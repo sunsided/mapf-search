@@ -17,9 +17,9 @@
 //! - [`ecbs`]: enhanced CBS, bounded-suboptimal within a [`Weight`] `w`, with focal search
 //!   at both levels.
 //! - [`icts`]: increasing cost tree search with pairwise pruning, optimal.
-//! - [`mstar`]: recursive M* (subdimensional expansion), optimal, and able to prove
-//!   unsolvability; [`mstar_with`] and [`MStarConfig`] select basic M* and operator
-//!   decomposition.
+//! - [`mstar`]: recursive M* with operator decomposition (subdimensional expansion),
+//!   optimal, and able to prove unsolvability; [`mstar_with`] and [`MStarConfig`] select
+//!   basic M*, recursive M* without operator decomposition, and OD-M*.
 //! - [`pbs()`]: priority-based search, fast but neither optimal nor complete.
 //!
 //! Every solver takes an [`Objective`]: sum of costs or makespan.

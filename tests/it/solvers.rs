@@ -35,7 +35,7 @@ impl Solver {
     }
 
     /// Every solver in a representative configuration, for `objective`.
-    pub fn all_for(objective: Objective) -> [Self; 7] {
+    pub fn all_for(objective: Objective) -> [Self; 8] {
         [
             Self::Cbs(CbsConfig::plain(objective)),
             Self::Cbs(CbsConfig::improved(objective)),
@@ -44,6 +44,7 @@ impl Solver {
             Self::Icts(objective),
             Self::MStar(MStarConfig::basic(objective)),
             Self::MStar(MStarConfig::recursive(objective)),
+            Self::MStar(MStarConfig::od_recursive(objective)),
         ]
     }
 

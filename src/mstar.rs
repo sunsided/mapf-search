@@ -99,7 +99,7 @@ impl MStarConfig {
         }
     }
 
-    /// Recursive M* (rM*); what [`mstar`] uses.
+    /// Recursive M* (rM*).
     #[must_use]
     pub const fn recursive(objective: Objective) -> Self {
         Self {
@@ -109,8 +109,9 @@ impl MStarConfig {
         }
     }
 
-    /// Recursive M* with operator decomposition (`ODrM*`). Often much faster than rM* on
-    /// tightly coupled groups, but not always: see `docs/design.md`.
+    /// Recursive M* with operator decomposition (`ODrM*`); what [`mstar`] and
+    /// [`MStarConfig::default`] use. Often much faster than rM* on tightly coupled groups,
+    /// but not always: see `docs/design.md`.
     #[must_use]
     pub const fn od_recursive(objective: Objective) -> Self {
         Self {
@@ -121,15 +122,22 @@ impl MStarConfig {
     }
 }
 
-/// Finds a conflict-free plan with the optimal `objective` value with recursive M*
-/// ([`MStarConfig::recursive`]).
+impl Default for MStarConfig {
+    /// [`MStarConfig::od_recursive`] for [`Objective::SumOfCosts`].
+    fn default() -> Self {
+        Self::od_recursive(Objective::SumOfCosts)
+    }
+}
+
+/// Finds a conflict-free plan with the optimal `objective` value with recursive M* and
+/// operator decomposition ([`MStarConfig::od_recursive`]).
 ///
 /// See [`mstar_with`] for the budget and what is counted.
 ///
 /// # Examples
 ///
 /// ```
-/// use mapf_search::{Agent, Grid, Instance, Limits, Objective, Outcome, mstar};
+/// use mapf_search::{Agent, Grid, Instance, Limits, MStarConfig, Objective, Outcome, mstar};
 ///
 /// // Two agents swap the ends of a corridor with one side pocket.
 /// let grid = Grid::parse(&["...", "@.@"]);
@@ -139,6 +147,7 @@ impl MStarConfig {
 /// ];
 /// let instance = Instance::new(grid.clone(), agents)?;
 /// let result = mstar(&instance, Objective::SumOfCosts, Limits::NONE);
+/// assert_eq!(MStarConfig::default(), MStarConfig::od_recursive(Objective::SumOfCosts));
 /// assert_eq!(result.solution().expect("solvable").sum_of_costs, 7);
 ///
 /// // Without the pocket they cannot pass, and M* proves it.
@@ -154,7 +163,7 @@ pub fn mstar<G: Graph>(
     objective: Objective,
     budget: impl Budget<Stats>,
 ) -> MapfResult {
-    mstar_with(instance, MStarConfig::recursive(objective), budget)
+    mstar_with(instance, MStarConfig::od_recursive(objective), budget)
 }
 
 /// Finds a conflict-free plan with the optimal `config.objective` value with the form of M*
