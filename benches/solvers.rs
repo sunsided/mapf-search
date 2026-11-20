@@ -38,7 +38,7 @@ fn main() {
     let instance = instance();
     let budget = || Limits::expansions(100_000);
     let soc = Objective::SumOfCosts;
-    let solvers: [(&str, &dyn Fn() -> MapfResult); 7] = [
+    let solvers: [(&str, &dyn Fn() -> MapfResult); 9] = [
         ("cbs plain", &|| {
             cbs_with(&instance, CbsConfig::plain(soc), budget())
         }),
@@ -55,6 +55,20 @@ fn main() {
         }),
         ("mstar recursive", &|| {
             mstar_with(&instance, MStarConfig::recursive(soc), budget())
+        }),
+        ("mstar basic od", &|| {
+            let config = MStarConfig {
+                operator_decomposition: true,
+                ..MStarConfig::basic(soc)
+            };
+            mstar_with(&instance, config, budget())
+        }),
+        ("mstar recursive makespan", &|| {
+            mstar_with(
+                &instance,
+                MStarConfig::recursive(Objective::Makespan),
+                budget(),
+            )
         }),
     ];
 

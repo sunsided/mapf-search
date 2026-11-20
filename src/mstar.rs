@@ -1,6 +1,7 @@
 //! M* ([`mstar`], Wagner and Choset 2015): A* in the joint space of all agents with
 //! subdimensional expansion, optimal for sum of costs or makespan ([`Objective`]), in its
-//! basic and its recursive form ([`MStarConfig`]).
+//! basic and its recursive form, each with or without operator decomposition
+//! ([`MStarConfig`]).
 //!
 //! Each agent follows its individual optimal policy (a fixed shortest path to its goal)
 //! until it collides. Colliding agents join the *collision set* of the state where the
@@ -17,14 +18,26 @@
 //!   caches. Only when a group's path collides with another agent do the two merge. So
 //!   two pairs of interacting agents far apart cost two small searches, not one over all
 //!   four.
+//! - **Operator decomposition** (`OD-M*` and `ODrM*`, Ferner, Wagner and Choset 2013): where
+//!   agents would branch over all combinations of their moves, they move one at a time
+//!   instead, through intermediate states that have their own collision sets. An agent
+//!   branches at an intermediate state only once a collision put it into that state's set.
 //!
 //! Goal-stay pricing, the same as an exact joint search: a joint state is every agent's
 //! vertex plus a *finished* flag. An unfinished agent at its goal may finish; from then on
 //! it stays there for free. Every other unfinished agent pays 1 per step, move or wait. So
 //! waiting at the goal before leaving it again is paid for. The heuristic, the sum of the
-//! unfinished agents' distances to their goals, is consistent. For makespan a joint step
-//! costs 1 if any agent pays, and the heuristic is the largest of those distances, which is
-//! consistent too.
+//! unfinished agents' distances to their goals, is consistent.
+//!
+//! **Makespan** is solved through sum of costs under a deadline. The sum-of-costs plan's
+//! makespan `U` bounds the optimum from above, the largest individual distance `L` from
+//! below. For each deadline `M` from `L` up to `U - 1`, a sum-of-costs search over states
+//! that carry their time, pruning every state from which an unfinished agent cannot reach
+//! its goal by `M`, either finds a plan (whose makespan is then optimal) or proves there is
+//! none; if none succeeds, the sum-of-costs plan is optimal. So the plan returned for
+//! makespan also has the least sum of costs among the makespan-optimal plans. (Pricing a
+//! joint step at 1 whenever any agent pays, as the oracle does, is also exact but leaves
+//! the search wide plateaus of equal `f`; it took 83 s on the benchmark instance.)
 //!
 //! ```mermaid
 //! flowchart TD
@@ -40,23 +53,28 @@
 //! ```
 
 mod collision;
+mod context;
 mod planner;
+mod state;
 
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
 use heuristic_search::{Budget, Stats};
 
-use self::planner::{Context, JointState, LimitReached, Planner};
+use self::context::{Context, LimitReached};
+use self::planner::Planner;
+use self::state::Key;
 use crate::graph::{Graph, Vertex};
 use crate::instance::Instance;
 use crate::low_level::distance_tables;
-use crate::path::{Objective, Path};
+use crate::path::{Objective, Path, Time};
 use crate::solution::{MapfResult, Outcome, Solution};
 
 /// What [`mstar_with`] optimizes and which form of M* it runs.
 ///
-/// Both forms return a plan with the optimal value of the objective; they differ in speed.
+/// Every form returns a plan with the optimal value of the objective; they differ in
+/// speed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MStarConfig {
     /// What the search minimizes.
@@ -64,6 +82,10 @@ pub struct MStarConfig {
     /// Recursive M*: plan disjoint collision groups as separate subproblems. `false` runs
     /// basic M*, with one collision set per state.
     pub recursive: bool,
+    /// Operator decomposition (OD-M*, Ferner, Wagner and Choset 2013): where agents branch,
+    /// move them one at a time through intermediate states with their own collision sets,
+    /// instead of generating every combination of their moves at once.
+    pub operator_decomposition: bool,
 }
 
 impl MStarConfig {
@@ -73,15 +95,28 @@ impl MStarConfig {
         Self {
             objective,
             recursive: false,
+            operator_decomposition: false,
         }
     }
 
-    /// Recursive M*; what [`mstar`] uses.
+    /// Recursive M* (rM*); what [`mstar`] uses.
     #[must_use]
     pub const fn recursive(objective: Objective) -> Self {
         Self {
             objective,
             recursive: true,
+            operator_decomposition: false,
+        }
+    }
+
+    /// Recursive M* with operator decomposition (`ODrM*`). Often much faster than rM* on
+    /// tightly coupled groups, but not always: see `docs/design.md`.
+    #[must_use]
+    pub const fn od_recursive(objective: Objective) -> Self {
+        Self {
+            objective,
+            recursive: true,
+            operator_decomposition: true,
         }
     }
 }
@@ -133,12 +168,9 @@ pub fn mstar<G: Graph>(
 /// [`Stats::expanded`], generated joint states in [`Stats::generated`] and expansions after
 /// a collision set grew in [`Stats::reopened`], all summed over every search.
 ///
-/// For [`Objective::Makespan`] the plan's sum of costs is not guaranteed minimal among the
-/// makespan-optimal plans. Makespan searches are much slower than sum-of-costs ones: an
-/// agent with slack may wander without raising `f`, so the plateaus of equal `f` are wide.
-/// Open states are therefore ordered by an estimate of their sum of costs within equal `f`.
-/// On the benchmark's 8-agent instance recursive M* takes about 60 ms for sum of costs and
-/// over a minute for makespan.
+/// For [`Objective::Makespan`] the plan has the optimal makespan and, among such plans, the
+/// least sum of costs; the counters sum over the searches of the module docs. On the
+/// benchmark's 8-agent instance recursive M* takes about 30-60 ms for either objective.
 ///
 /// # Examples
 ///
@@ -171,43 +203,103 @@ pub fn mstar_with<G: Graph>(
     mut budget: impl Budget<Stats>,
 ) -> MapfResult {
     let distances = distance_tables(instance.graph(), instance.agents());
-    let mut cx = Context {
-        policy: policies(instance.graph(), &distances),
+    let policy = policies(instance.graph(), &distances);
+    let mut run = Run {
         instance,
-        objective: config.objective,
-        recursive: config.recursive,
+        config,
         distances,
-        planners: BTreeMap::new(),
+        policy,
         stats: Stats::default(),
     };
-    let outcome = run(&mut cx, &mut budget);
+
+    let outcome = match config.objective {
+        Objective::SumOfCosts => run.search(None, &mut budget),
+        Objective::Makespan => run.makespan(&mut budget),
+    };
 
     MapfResult {
         outcome,
-        stats: cx.stats,
+        stats: run.stats,
     }
 }
 
-/// Runs the top-level search over every agent to its end.
-fn run<G: Graph>(cx: &mut Context<'_, G>, budget: &mut impl Budget<Stats>) -> Outcome {
-    let agents = cx.instance.agents();
-    let start: JointState = agents.iter().map(|a| (a.start, false)).collect();
-    let mut planner = Planner::new((0..agents.len()).collect());
+/// One [`mstar_with`] call: what its searches share, and the counters over all of them.
+struct Run<'a, G> {
+    /// The instance being solved.
+    instance: &'a Instance<G>,
+    /// The form of M*.
+    config: MStarConfig,
+    /// Distances to each agent's goal, indexed by agent.
+    distances: Vec<Vec<Option<u32>>>,
+    /// Each agent's individual optimal policy ([`policies`]).
+    policy: Vec<Vec<Option<Vertex>>>,
+    /// Counters over every search so far.
+    stats: Stats,
+}
 
-    match planner.search(cx, start, budget) {
-        Ok(Some(states)) => Outcome::Solved(Solution::new(paths(&states))),
-        Ok(None) => Outcome::Unsolvable,
-        Err(LimitReached) => Outcome::LimitReached,
+impl<G: Graph> Run<'_, G> {
+    /// The makespan-optimal plan, as described in the module docs: the sum-of-costs plan
+    /// first, then sum-of-costs searches under ever later deadlines from the lower bound
+    /// on, until one succeeds or the deadline reaches that plan's makespan.
+    fn makespan(&mut self, budget: &mut impl Budget<Stats>) -> Outcome {
+        let fallback = match self.search(None, budget) {
+            Outcome::Solved(solution) => solution,
+            other => return other,
+        };
+
+        let lower_bound = self
+            .instance
+            .agents()
+            .iter()
+            .zip(&self.distances)
+            .filter_map(|(agent, distances)| distances[agent.start])
+            .max()
+            .unwrap_or(0);
+        for deadline in lower_bound..fallback.makespan {
+            match self.search(Some(deadline), budget) {
+                Outcome::Unsolvable => {}
+                other => return other,
+            }
+        }
+
+        Outcome::Solved(fallback)
+    }
+
+    /// One search for the plan with the optimal sum of costs among those in which every
+    /// agent finishes by `deadline` (any time if `None`).
+    fn search(&mut self, deadline: Option<Time>, budget: &mut impl Budget<Stats>) -> Outcome {
+        let mut cx = Context {
+            instance: self.instance,
+            recursive: self.config.recursive,
+            decompose: self.config.operator_decomposition,
+            deadline,
+            distances: self.distances.clone(),
+            policy: self.policy.clone(),
+            planners: BTreeMap::new(),
+            stats: self.stats,
+        };
+        let agents = self.instance.agents();
+        let start = Key::standard(0, agents.iter().map(|a| (a.start, false)).collect());
+        let mut planner = Planner::new((0..agents.len()).collect());
+
+        let outcome = match planner.search(&mut cx, start, budget) {
+            Ok(Some(states)) => Outcome::Solved(Solution::new(paths(&states))),
+            Ok(None) => Outcome::Unsolvable,
+            Err(LimitReached) => Outcome::LimitReached,
+        };
+        self.stats = cx.stats;
+
+        outcome
     }
 }
 
-/// Each agent's path along the joint `states`, trimmed of trailing waits.
-fn paths(states: &[JointState]) -> Vec<Path> {
-    let agents = states.first().map_or(0, Vec::len);
+/// Each agent's path along the standard `states`, trimmed of trailing waits.
+fn paths(states: &[Key]) -> Vec<Path> {
+    let agents = states.first().map_or(0, |state| state.base.len());
 
     (0..agents)
         .map(|agent| {
-            let mut path: Path = states.iter().map(|state| state[agent].0).collect();
+            let mut path: Path = states.iter().map(|state| state.base[agent].0).collect();
             while path.len() > 1 && path[path.len() - 2] == path[path.len() - 1] {
                 path.pop();
             }

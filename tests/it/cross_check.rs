@@ -1,5 +1,5 @@
 //! Cross-checks on random grids too large for the oracle: the optimal solvers (CBS, ICTS,
-//! basic and recursive M*) agree on the optimum, ECBS stays within its factor of it, PBS is
+//! basic, recursive and OD-recursive M*) agree on the optimum, ECBS stays within its factor of it, PBS is
 //! no cheaper, and every plan passes the independent plan checker.
 
 use core::ops::RangeInclusive;
@@ -143,6 +143,7 @@ proptest! {
             Solver::Icts(objective),
             Solver::MStar(MStarConfig::basic(objective)),
             Solver::MStar(MStarConfig::recursive(objective)),
+            Solver::MStar(MStarConfig::od_recursive(objective)),
         ];
         let others = [
             Solver::Ecbs(objective, Weight::new(3, 2)),
@@ -153,7 +154,8 @@ proptest! {
         agree(&grid, &agents, objective, &optimal, &others)?;
     }
 
-    /// With more agents, recursive M* agrees with CBS, for both objectives.
+    /// With more agents, recursive M* with and without operator decomposition agrees with
+    /// CBS, for both objectives.
     #[test]
     fn recursive_mstar_agrees_with_cbs_on_more_agents(
         (grid, agents) in instance(5..=6, 5..=6),
@@ -163,6 +165,7 @@ proptest! {
         let optimal = [
             Solver::Cbs(CbsConfig::improved(objective)),
             Solver::MStar(MStarConfig::recursive(objective)),
+            Solver::MStar(MStarConfig::od_recursive(objective)),
         ];
 
         agree(&grid, &agents, objective, &optimal, &[])?;

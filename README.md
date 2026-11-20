@@ -11,8 +11,8 @@ Multi-agent pathfinding: CBS, ECBS, CBS-TA, ICTS, PBS, M* and MAPF-LNS2.
 - ECBS, bounded-suboptimal, focal search at both levels (`ecbs`)
 - PBS, priority-based search: fast, neither optimal nor complete (`pbs`)
 - ICTS with pairwise pruning, optimal (`icts`)
-- M*, basic and recursive (rM*), optimal, proves unsolvability (`mstar`, `mstar_with`,
-  `MStarConfig`)
+- M*, basic and recursive (rM*), each with or without operator decomposition (OD-M*,
+  ODrM*), optimal, proves unsolvability (`mstar`, `mstar_with`, `MStarConfig`)
 - Every solver takes an `Objective`: sum of costs or makespan
 - Shared parts: conflict detection, constraints, space-time A* low level, MDDs, Moving AI
   `.map`/`.scen` parsers
@@ -20,7 +20,6 @@ Multi-agent pathfinding: CBS, ECBS, CBS-TA, ICTS, PBS, M* and MAPF-LNS2.
 ## Planned scope
 
 - Conflict-based: CBS-TA
-- ODrM* (operator decomposition for recursive M*)
 - Local repair: MAPF-LNS2
 - Partial expansion: EPEA*
 
@@ -41,7 +40,8 @@ Nothing is published yet, but code written against earlier states of this branch
 - **Every solver takes an `Objective`**: `ecbs(instance, objective, weight, budget)`,
   `pbs(instance, objective, budget)`, `icts(instance, objective, budget)` and
   `mstar(instance, objective, budget)`.
-- **`mstar` runs recursive M\***; `mstar_with` and `MStarConfig::basic` select basic M*.
+- **`mstar` runs recursive M\***; `mstar_with` and `MStarConfig` (now with
+  `operator_decomposition`) select the other forms.
 - **`CbsConfig`**: `cardinal_heuristic: bool` became `heuristic: CbsHeuristic` (`None`,
   `Cg`, `Dg`, `Wdg`), and the struct gained `splitting: Splitting` and
   `conflict_avoidance: bool`. `CbsConfig::improved` (what `cbs` uses) now means DG,

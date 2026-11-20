@@ -185,14 +185,16 @@ proptest! {
         check(&grid, &agents, Solver::Icts(objective))?;
     }
 
-    /// Basic and recursive M* agree with the oracle, for both objectives.
+    /// Basic and recursive M*, each with and without operator decomposition, agree with the
+    /// oracle, for both objectives.
     #[test]
     fn mstar_matches_joint_search(
         (grid, agents) in instance(),
         objective in objective(),
         recursive in any::<bool>(),
+        operator_decomposition in any::<bool>(),
     ) {
-        let config = MStarConfig { objective, recursive };
+        let config = MStarConfig { objective, recursive, operator_decomposition };
         check(&grid, &agents, Solver::MStar(config))?;
     }
 

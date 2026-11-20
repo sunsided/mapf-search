@@ -18,7 +18,8 @@
 //!   at both levels.
 //! - [`icts`]: increasing cost tree search with pairwise pruning, optimal.
 //! - [`mstar`]: recursive M* (subdimensional expansion), optimal, and able to prove
-//!   unsolvability; [`mstar_with`] and [`MStarConfig`] select basic M*.
+//!   unsolvability; [`mstar_with`] and [`MStarConfig`] select basic M* and operator
+//!   decomposition.
 //! - [`pbs()`]: priority-based search, fast but neither optimal nor complete.
 //!
 //! Every solver takes an [`Objective`]: sum of costs or makespan.
@@ -57,7 +58,6 @@
 //! ## Planned scope
 //!
 //! - Conflict-based: CBS-TA
-//! - `ODrM*`: operator decomposition for recursive M*
 //! - Local repair: MAPF-LNS2
 //! - Partial expansion: EPEA*
 //!

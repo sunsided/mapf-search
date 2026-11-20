@@ -304,8 +304,9 @@ fn low_level_respects_positive_constraints() {
 
 /// Two pairs of agents swap places in two rooms, the right pair later than the left one.
 /// Recursive M* plans the pairs apart and needs fewer expansions than basic M*, which
-/// branches over all four agents once both pairs collided; both are optimal, for both
-/// objectives, and the oracle agrees.
+/// branches over all four agents once both pairs collided. All four forms (with and
+/// without operator decomposition) are optimal, for both objectives, and the oracle
+/// agrees.
 #[test]
 fn recursive_mstar_plans_independent_pairs_apart() {
     let grid = Grid::parse(&["...@.....", "@.@@@@@.@"]);
@@ -334,8 +335,15 @@ fn recursive_mstar_plans_independent_pairs_apart() {
         let optimum = optimal_cost(&grid, &agents, objective);
         let basic = mstar_with(&instance, MStarConfig::basic(objective), Limits::NONE);
         let recursive = mstar_with(&instance, MStarConfig::recursive(objective), Limits::NONE);
+        let decomposed = MStarConfig {
+            operator_decomposition: true,
+            ..MStarConfig::basic(objective)
+        };
+        let decomposed = mstar_with(&instance, decomposed, Limits::NONE);
+        let od_recursive = MStarConfig::od_recursive(objective);
+        let od_recursive = mstar_with(&instance, od_recursive, Limits::NONE);
 
-        for result in [&basic, &recursive] {
+        for result in [&basic, &recursive, &decomposed, &od_recursive] {
             let solution = result.solution().expect("solvable");
             assert_valid_plan(&grid, &agents, &solution.paths);
             assert_eq!(Some(solution.cost(objective)), optimum, "{objective:?}");

@@ -70,11 +70,10 @@ The other solvers:
 - **ICTS** searches the chain of vectors `(m, ..., m)` from the largest individual optimum
   on. An MDD of depth `m` contains the paths that arrive earlier and wait, so the first
   solvable `m` is the optimal makespan.
-- **M\*** prices a joint step at 1 if any agent pays (as the oracle does) and uses the
-  largest unfinished distance as its heuristic. That heuristic is consistent: a step
-  lowers every distance by at most 1 and costs 1 while any agent is unfinished.
+- **M\*** solves makespan through sum of costs under deadlines (see M*). Its plan also
+  has the least sum of costs among the makespan-optimal plans.
 
-None of them minimizes the sum of costs among the makespan-optimal plans.
+The other solvers do not minimize the sum of costs among the makespan-optimal plans.
 
 ## Constraints
 
@@ -425,45 +424,79 @@ swap where CBS and ICTS only hit their budget.
 - **Budget.** All planners share one `Stats` and one budget, asked before every
   expansion in any planner. A query stopped by the budget reports `LimitReached` all the
   way up; only an exhausted query prunes a state.
-- **Ties.** Within equal `f`, the open list prefers a smaller sum-of-costs estimate (the
-  sum of the agents' step costs so far plus their distances), then larger `g`. For sum of
-  costs this is `f` again. For makespan it steers the search through its plateaus: an agent
-  with slack can wander without raising `f`.
+Optimality is Wagner and Choset's result, stated for a joint cost that sums the robots'
+costs, which is the only cost the search uses (see makespan below). The oracle properties
+check every form for both objectives; cross-checks compare the forms with CBS on 3-4 and
+5-6 agents, and a hand-made case with two separate pairs checks that rM* expands fewer
+states than basic M*.
 
-Optimality for sum of costs is Wagner and Choset's result, which is stated for a joint
-cost that sums the robots' costs. For makespan this crate relies on its own argument,
-backed by tests rather than the paper: a group's optimal joint path is the group's
-policy, and two groups that never collide combine into an optimal path of their union,
-because the union's makespan is the maximum of theirs. The oracle properties check both
-forms and both objectives; a cross-check compares rM* with CBS on 5-6 agents, and a
-hand-made case with two separate pairs checks that rM* expands fewer states.
+### Operator decomposition (OD-M*, ODrM*)
 
-On the benchmark's 8-agent instance (sum of costs 92) basic M* takes about 320 ms and
-rM* about 50 ms (5 000 expansions over all planners, against 550 expansions with
-250 000 generated joint states for basic M*: its full branching over a big group is the
-cost). Makespan is much slower for both forms (rM* takes over a minute on that instance)
-because of the plateaus; it is supported, not fast.
+`MStarConfig::operator_decomposition` (Ferner, Wagner and Choset 2013; `od_recursive`
+with rM*). A state is a `Key`: the time, every agent's position (`base`) and the new
+positions of the first `k` agents of the planner's order (`moved`; empty for a standard
+state). Where a standard state would branch (basic M*: its collision set is not empty;
+rM*: a group of all the planner's agents), it is expanded one agent at a time instead:
 
-**Not attempted: ODrM\*** (operator decomposition). OD replaces the full branching of a
-group, one step with `b^k` successors, by `k` steps of `b` successors each, through
-intermediate states where only some agents have moved. That is exactly the cost behind
-basic M*'s 250 000 generated states on the benchmark, so the gain can be large. The
-obstacles, which is why it is left for later:
+- the next agent `k` branches if the state's *own* collision set holds it, else takes its
+  individual policy move; the last agent's move yields the standard successor;
+- a move that collides with an agent moved earlier in the step (same vertex, or a swap)
+  passes the pair back from this intermediate state, through the same back sets as
+  standard states, so the agent that moved earlier branches at its state too;
+- intermediate states start with empty collision sets, so an agent only branches once a
+  collision downstream needs it to;
+- the heuristic is the sum of the distances at the current positions (moved agents at
+  their new ones), consistent like the standard one; only standard states are goals and
+  enter the forward cache of exact costs.
 
-- intermediate states need their own collision sets and predecessor sets, and collisions
-  found between an agent and the agents already moved in the same step must pass back
-  through them;
-- a subgroup that follows its own optimal joint path is defined at standard states, so
-  mixing it with intermediate states needs a rule for which agents of a group have moved;
-- for makespan, a joint step costs 1 if any agent pays, which does not split over the
-  agents of an operator-decomposed step without making `g` depend on the agent order.
+Measurements (release build):
+
+| | basic M* | OD-M* | rM* | ODrM* |
+|---|---|---|---|---|
+| benchmark, 8 agents | 350 ms | 25 ms | 30 ms | 12 s (5.4 M expansions) |
+| 300 random 5x5-6x6 grids, 5-7 agents, total | | | 36 s | 8 s |
+
+OD wins where groups are large and tightly coupled: on the random instances the slowest
+rM* cases drop from 8 s to 1 s and from 17 s to 3 s. But ODrM* is not uniformly better:
+on easy instances it is two to three times slower (every agent of a branching step costs
+an expansion), on one of the random instances it needs over 2 million expansions where
+rM* needs 112 000, and on the benchmark its subgroup searches form different, larger
+groups (five agents queried 24 times) than rM*'s. Applying OD only in the top-level
+planner removes the slowdown and the gain alike. So `mstar` keeps rM*, and ODrM* is
+opt-in (see the open questions).
+
+### Makespan
+
+Pricing a joint step at 1 whenever any agent pays (as the oracle does) is exact but slow:
+an agent with slack can wander without raising `f`, collisions found on those plateaus
+merge groups, and rM* took 83 s on the benchmark instance (over 3.6 million top-level
+states). Tie-breaking by a sum-of-costs estimate, or comparing paths by `(makespan, sum
+of costs)`, did not change that.
+
+Instead, `mstar_with` solves makespan through sum of costs (`Run::makespan`):
+
+1. Solve for sum of costs. Unsolvable or out of budget ends the run. Otherwise its
+   makespan `U` is an upper bound on the optimum.
+2. The largest individual distance `L` is a lower bound. For each deadline `M` from `L`
+   to `U - 1`, solve for sum of costs under the deadline: states carry their time
+   (without a deadline the time is always `0`), and a state from which an unfinished
+   agent cannot reach its goal by `M` is pruned, in the choices and in the heuristic.
+   Policy moves and subgroup paths keep a feasible state feasible. The first `M` with a
+   plan is the optimal makespan; a search that exhausts its space proves `M` too small.
+3. If no deadline below `U` works, the first plan is optimal.
+
+Each deadline search is a fresh run of the planners (their caches depend on the
+deadline); the counters and the budget carry over. The plan has the optimal makespan and,
+among such plans, the least sum of costs. On the benchmark `L = U = 14`, so makespan costs
+one sum-of-costs search: rM* 30 ms instead of 83 s, basic M* 330 ms, OD-M* 25 ms. A
+deadline search that fails must exhaust its time-expanded space, so instances whose
+optimal makespan is far above `L` cost more.
 
 ## Later algorithms
 
 - **CBS-TA** (Hönig et al. 2018): task assignment plus pathfinding. The root enumerates
   assignments in order of cost (Murty's k-best assignments); each CT node also carries
   an assignment. Agents get a set of candidate goals.
-- **ODrM\***: operator decomposition inside recursive M* (see above).
 - **MAPF-LNS2** (Li et al. 2022): start from a plan with collisions (prioritized planning
   with soft constraints), repeatedly pick a neighbourhood of agents, replan them with
   SIPPS, keep the result if collisions drop. Needs SIPP (safe-interval path planning) as
@@ -563,7 +596,7 @@ lower bound on 4-connected grids. Moves stay 4-connected, as in the MAPF benchma
    heuristics, conflict avoidance table, disjoint splitting.
 4. **Done in this draft:** ECBS (local focal list), PBS (with `block_from`).
 5. **Done in this draft:** ICTS (shares MDDs), basic and recursive M*, every solver for
-   both objectives. Open: ODrM*.
+   both objectives, operator decomposition (OD-M*, ODrM*).
 6. SIPP and MAPF-LNS2; CBS-TA; EPEA*.
 
 ## Cross-crate needs
