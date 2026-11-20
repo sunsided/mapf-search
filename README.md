@@ -14,9 +14,10 @@ Multi-agent pathfinding: CBS, ECBS, CBS-TA, ICTS, PBS, M*, MO-CBS and MAPF-LNS2.
 - M*, basic and recursive (rM*), each with or without operator decomposition (OD-M*,
   ODrM*), optimal, proves unsolvability (`mstar`, `mstar_with`, `MStarConfig`)
 - MO-CBS, multi-objective CBS: every Pareto-optimal plan when moves and waits cost
-  vectors, plain or tree-by-tree (MO-CBS-t), over BOA* or NAMOA*dr from
-  `multiobjective-search` (`mo_cbs`, `mo_cbs_with`, `MoCbsConfig`; optional feature
-  `multi-objective`)
+  vectors, shared or per agent; plain or tree-by-tree (MO-CBS-t), over BOA* or NAMOA*dr
+  from `multiobjective-search`, with an opt-in feasibility check (proves unsolvability),
+  conflict prioritization, bypass and disjoint splitting (`mo_cbs`, `mo_cbs_with`,
+  `mo_cbs_per_agent`, `MoCbsConfig`; optional feature `multi-objective`)
 - Every single-objective solver takes an `Objective`: sum of costs or makespan
 - Shared parts: conflict detection, constraints, space-time A* low level, MDDs, Moving AI
   `.map`/`.scen` parsers
@@ -51,6 +52,10 @@ Nothing is published yet, but code written against earlier states of this branch
   `Cg`, `Dg`, `Wdg`), and the struct gained `splitting: Splitting` and
   `conflict_avoidance: bool`. `CbsConfig::improved` (what `cbs` uses) now means DG,
   disjoint splitting and the conflict avoidance table on top of the earlier improvements.
+- **`MoCbsConfig`** gained `feasibility_check`, `prioritize_conflicts`, `bypass` and
+  `splitting`, so struct literals need them (or `..MoCbsConfig::plain()`), and `mo_cbs`
+  and `MoCbsConfig::default()` now mean `MoCbsConfig::improved()` instead of
+  `MoCbsConfig::tree_by_tree()`. The front is the same.
 - **`Constraint`** gained `PositiveVertex` and `PositiveEdge`, so exhaustive matches on it
   need new arms, and `ConstraintSet::for_agent` adds the negative constraints that other
   agents' positive constraints imply.

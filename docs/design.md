@@ -506,6 +506,13 @@ answer is the Pareto-optimal front, one plan per Pareto-optimal cost vector.
 
 - **Costs.** A closure `costs(from, to) -> [u32; N]`; `costs(v, v)` is the wait at `v`
   (the paper's self-loops). `N` is a const generic, so cost vectors are plain arrays.
+  `mo_cbs_per_agent` takes `costs(agent, from, to)` instead, one cost model per agent;
+  the shared form is a wrapper around it.
+- **Configurations.** `MoCbsConfig::plain()` is the paper's Alg. 1 and
+  `MoCbsConfig::tree_by_tree()` its MO-CBS-t, both with no improvements.
+  `MoCbsConfig::improved()` (what `mo_cbs` and `MoCbsConfig::default()` use) is MO-CBS-t
+  with the feasibility check, conflict prioritization, bypass and disjoint splitting; each
+  is a separate switch.
 - **High level.** Alg. 1 as written: the roots are the product of the agents' Pareto
   sets; nodes are popped in lexicographic cost order (a `BTreeMap` keyed by cost and
   creation order); Filter drops a node that a found solution weakly dominates, at pop and
@@ -545,12 +552,53 @@ on the MSRV is multiobjective-search's 1.86 instead of 1.85.
   time, so it is consistent, as NAMOA*dr and BOA* require.
 - **BOA\* adapter.** BOA* is typed for `[C; 2]`; for `N == 2` a small wrapper re-types
   the weights (`LowLevel::Auto`). `LowLevel::NamoaDr` forces NAMOA*dr for any `N`.
-- **No budget inside.** Neither search takes a budget, so one low-level call runs to
-  completion, like the single-objective low level with `Limits::NONE`.
+- **Budget.** Neither search takes a budget; the adapter asks it instead (see Budget
+  inside the low level).
 
 The sibling's working tree had uncommitted changes (a new `mvh` module) while this was
 written; they compiled and do not touch NAMOA*dr or BOA*, but the checks ran against
 that tree, not a clean `d333a8a`.
+
+### Improvements
+
+None of them changes the front; each is checked against the oracle in every combination.
+
+- **Feasibility check** (`feasibility_check`, the paper's Sec. VII-B). Feasibility does
+  not depend on the costs, so recursive M* (`MStarConfig::recursive`) with unit costs
+  decides it; M* proves unsolvability because its joint space is finite. The paper cites a
+  polynomial-time test (Kornhauser et al. 1984); M* is exponential in the worst case but
+  already in the crate. M* gets the caller's budget with its own counters; if the budget
+  stops it, the search goes on without the proof. rM*, not ODrM*, because ODrM* was much
+  slower on the 8-agent benchmark (see M*).
+- **Conflict prioritization** (`prioritize_conflicts`). A conflict is cardinal for an
+  agent if every path of the agent's current Pareto set takes part in it (the
+  multi-objective reading of "every cheapest path", from the Pareto sets the low level
+  returns anyway, so no MDD is built); then whichever of its Pareto paths the agent keeps,
+  the child that forbids the conflict must replace it. Cardinal for both, then for one,
+  then the rest; the earliest within a class. The Pareto sets stored per node predate the
+  negative constraints that other agents' later positive constraints imply, so this is a
+  heuristic order, which is all it needs to be: Lemma 2 holds for any split conflict.
+- **Bypass** (`bypass`). If every agent a child replans has a path of exactly its cost in
+  the parent and those paths leave fewer conflicts, the parent takes them over and is
+  reopened instead of being split. The node keeps its constraints and its per-agent cost
+  vectors, which is all a P-node (Def. 3) depends on, so Lemmas 2 and 3 still hold.
+- **Disjoint splitting** (`splitting: Splitting::Disjoint`, Li et al. 2019): one child
+  forbids the conflict to one agent, the other requires it of that agent, which forbids it
+  to the others; every other agent whose path breaks that is replanned, and the child
+  becomes one node per combination of their Pareto paths. The two children partition the
+  solutions, and the positive child keeps, for each replanned agent, a path weakly
+  dominating its path in each permitted solution. The split agent is the one for which the
+  conflict is cardinal if only one is, else the conflict's first agent.
+
+### Budget inside the low level
+
+NAMOA*dr and BOA* take no budget, and multiobjective-search is read-only here, so the hook
+is in the space-time adapter: `SpaceTime` asks the caller's budget (with the high-level
+counters) before its first expansion and every 256 expansions after. Once the budget says
+stop it generates no more successors, the search drains its open list, and the run ends
+with `LimitReached`. A `Limits` budget sees no change during one low-level call, so it
+still bounds high-level expansions only; a closure over a deadline or a cancellation flag
+stops a long low-level call.
 
 ### Paper comparison
 
@@ -570,8 +618,10 @@ that tree, not a clean `d333a8a`.
 | MO-CBS-b: BOA*-st low level, two objectives | `LowLevel::Auto` with `N == 2` | same, via multiobjective-search |
 | Time horizon `T`, "a large positive integer" | `latest_step + vertex_count`, which loses no Pareto-optimal cost vector | sharper |
 | Heuristic: `M` backward Dijkstra searches per agent | the same | same |
-| Feasibility pre-check for infeasible instances (unit-cost MAPF, Kornhauser et al.) | not done: `Unsolvable` only when an agent has no path alone or the forest is exhausted; otherwise the budget ends the run (`LimitReached`), as for CBS | missing |
-| Runtime limit | `impl Budget<Stats>`, asked before each expansion | equivalent |
+| Feasibility pre-check for infeasible instances (unit-cost MAPF, polynomial test of Kornhauser et al.) | `feasibility_check`: recursive M* with unit costs proves `Unsolvable`; exponential in the worst case, under the budget | same purpose, different test |
+| Expansion: any detected conflict, standard splitting | `MoCbsConfig::plain()` and `tree_by_tree()`; `improved()` adds conflict prioritization, bypass and disjoint splitting | beyond the paper, opt-in |
+| Edge costs shared by all agents | shared (`mo_cbs_with`) or per agent (`mo_cbs_per_agent`) | generalized |
+| Runtime limit | `impl Budget<Stats>`, asked before each high-level expansion and inside the low level | equivalent |
 | A cost-unification variant ("MO-CBS-c") | not in 2101.03805v5, which defines only MO-CBS, -t, -n and -b | not applicable |
 
 ### Tests and measurements
@@ -584,8 +634,10 @@ that tree, not a clean `d333a8a`.
   which would need a horizon argument of its own.
 - **Properties** (`tests/it/mo_cbs.rs`, 48 cases each): random tiny grids with 2-3 agents
   and random cost tables (components 1 to 3, per directed move and per wait): two
-  objectives over all four variants, three objectives (plain and `-t`), one weighted
+  objectives with shared and with per-agent costs, each over random configurations (all
+  six switches drawn independently), three objectives (plain and improved), one weighted
   objective, and unit costs against the joint oracle's and CBS's optimal sum of costs.
+  On an unsolvable instance a run with the feasibility check must return `Unsolvable`.
   On a solvable instance the run must be `Complete`, its cost vectors equal to the
   oracle's, and every plan must pass the oracle's plan checker and `first_conflict`, with
   its cost recomputed from the paths. MO-CBS splits like plain CBS (standard splitting,
@@ -597,15 +649,23 @@ that tree, not a clean `d333a8a`.
   three-objective properties fail with missing front points. Skipping Update does not:
   in lexicographic pop order a dominating solution is almost always found before the
   ones it dominates, so the properties never reached that case. A unit test of
-  `record` covers Update and Filter directly and fails without Update.
+  `record` covers Update and Filter directly and fails without Update. Two mutations of
+  the improvements fail the properties as well: bypass adopting a path of a different
+  cost, and a positive child that replans no other agent.
 - **Hand cases:** a corridor swap with a risky pocket and a long safe loop, where every
   root conflicts and the front `[[8, 16], [9, 9]]` comes from conflict resolution (checked
-  by hand); an unreachable goal (`Unsolvable`); a bare corridor swap (`LimitReached`).
+  by hand), for plain, `-t` and improved; an unreachable goal (`Unsolvable`); a bare
+  corridor swap (`LimitReached` without the feasibility check, `Unsolvable` with it); a
+  single agent whose run a budget stops inside the low level. Unit tests cover the
+  combinations, conflict choice, bypass and the low-level interrupt.
 - **Benchmark** (`benches/mo_cbs.rs`, `--features multi-objective`): three agents on a
   6x6 grid with walls, two objectives with hashed edge costs in `1..=4` as in the paper's
-  experiments. Front of 2, 2 110 expansions for every variant; about 175 ms for MO-CBS-b
-  and -tb, 285 ms for -n and -tn (bench profile, shared machine), so BOA*-st
-  is about 1.6 times faster than NAMOA*dr-st here, in line with the paper's Table I.
+  experiments. Front of 2, 2 110 expansions for each of the paper's variants; about
+  175 ms for MO-CBS-b and -tb, 285 ms for -n and -tn at first (bench profile, shared
+  machine), so BOA*-st is about 1.6 times faster than NAMOA*dr-st here, in line with the
+  paper's Table I. In a later, quieter run: about 105 ms for -b and -tb, 130 ms for -n and
+  -tn, and 6 ms and 126 expansions for the improved configuration, feasibility check
+  included.
 
 ## Later algorithms
 
@@ -715,7 +775,8 @@ lower bound on 4-connected grids. Moves stay 4-connected, as in the MAPF benchma
 4. **Done in this draft:** ECBS (local focal list), PBS (with `block_from`).
 5. **Done in this draft:** ICTS (shares MDDs), basic and recursive M*, every solver for
    both objectives, operator decomposition (OD-M*, ODrM*).
-6. **Done in this draft:** MO-CBS with its -t, -n and -b variants (feature
+6. **Done in this draft:** MO-CBS with its -t, -n and -b variants, the feasibility
+   check, ICBS-style improvements, a low-level budget hook and per-agent costs (feature
    `multi-objective`).
 7. SIPP and MAPF-LNS2; CBS-TA; EPEA*.
 
