@@ -107,7 +107,8 @@ pub use instance::{Agent, AgentId, Instance, InstanceError};
 pub use low_level::space_time_astar;
 #[cfg(feature = "multi-objective")]
 pub use mo_cbs::{
-    LowLevel, MoCbsConfig, ParetoOutcome, ParetoResult, ParetoSolution, mo_cbs, mo_cbs_with,
+    LowLevel, MoCbsConfig, ParetoOutcome, ParetoResult, ParetoSolution, mo_cbs, mo_cbs_per_agent,
+    mo_cbs_with,
 };
 pub use movingai::{
     ParseError, ParseErrorKind, ScenarioEntry, ScenarioError, parse_map, parse_scenario,

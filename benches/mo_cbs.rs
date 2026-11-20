@@ -1,5 +1,5 @@
-//! Benchmarks: the four MO-CBS variants (plain or tree-by-tree, BOA* or NAMOA*dr) on one
-//! fixed 6x6 instance with three agents and two objectives and hashed edge costs. Run with
+//! Benchmarks: the four MO-CBS variants of the paper (plain or tree-by-tree, BOA* or
+//! NAMOA*dr) and the improved configuration on one fixed 6x6 instance with three agents and two objectives and hashed edge costs. Run with
 //! `cargo bench --features multi-objective --bench mo_cbs`.
 
 use std::hint::black_box;
@@ -39,8 +39,9 @@ fn main() {
     let variant = |tree_by_tree, low_level| MoCbsConfig {
         tree_by_tree,
         low_level,
+        ..MoCbsConfig::plain()
     };
-    let solvers: [(&str, &dyn Fn() -> ParetoResult<2>); 4] = [
+    let solvers: [(&str, &dyn Fn() -> ParetoResult<2>); 5] = [
         ("mo-cbs-b", &|| {
             mo_cbs_with(&instance, &costs, variant(false, LowLevel::Auto), budget())
         }),
@@ -54,6 +55,9 @@ fn main() {
         }),
         ("mo-cbs-tb", &|| {
             mo_cbs_with(&instance, &costs, variant(true, LowLevel::Auto), budget())
+        }),
+        ("mo-cbs improved", &|| {
+            mo_cbs_with(&instance, &costs, MoCbsConfig::improved(), budget())
         }),
         ("mo-cbs-tn", &|| {
             mo_cbs_with(

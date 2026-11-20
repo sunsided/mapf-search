@@ -14,45 +14,56 @@
 //!
 //! ```mermaid
 //! flowchart TD
-//!     init[Pareto paths of every agent alone] -->|an agent has none| unsolvable[Unsolvable]
+//!     check{feasibility check proves no plan?} -->|yes| unsolvable[Unsolvable]
+//!     check -->|no, or off| init[Pareto paths of every agent alone]
+//!     init -->|an agent has none| unsolvable
 //!     init --> roots[root nodes: all combinations, or one tree at a time]
 //!     roots --> pop[pop the lexicographically cheapest node]
 //!     pop -->|open list empty, next tree| roots
 //!     pop -->|weakly dominated by a solution| pop
-//!     pop --> conflict{first conflict?}
+//!     pop --> conflict{chosen conflict?}
 //!     conflict -->|none| record[add to the front, drop what it dominates]
 //!     record --> pop
 //!     conflict --> budget{budget exhausted?}
 //!     budget -->|yes| limit[LimitReached]
-//!     budget -->|no| split[two constraints; one child per Pareto path of the replanned agent]
+//!     budget -->|no| split[two constraints; one child per combination of Pareto paths]
+//!     split -->|bypass: same costs, fewer conflicts| pop
 //!     split --> pop
 //!     pop -->|all trees done| complete[Complete]
 //! ```
 //!
 //! The paper's variants map onto [`MoCbsConfig`]: [`MoCbsConfig::tree_by_tree`] is the
 //! `-t` variant, and [`LowLevel`] picks BOA*-st (`-b`, two objectives) or NAMOA*dr-st
-//! (`-n`, any number).
+//! (`-n`, any number). [`MoCbsConfig::improved`] adds the paper's feasibility check and,
+//! beyond the paper, ICBS-style conflict prioritization, bypass and disjoint splitting
+//! ([`split`]); none of them changes the front.
 //!
 //! Costs follow goal-stay, as everywhere in the crate: an agent pays for every move and
 //! wait until its final arrival at its goal and nothing afterwards. With one objective and
 //! unit costs, the front is the single optimal sum of costs.
 
 mod low_level;
+mod node;
+mod split;
 
 use alloc::collections::BTreeMap;
 use alloc::rc::Rc;
-use alloc::vec;
 use alloc::vec::Vec;
+use core::cell::RefCell;
 
 use heuristic_search::{Budget, Stats};
-use multiobjective_search::{Dominates, add, weakly_dominates};
+use multiobjective_search::{Dominates, weakly_dominates};
 
-use self::low_level::{Heuristic, pareto_paths};
-use crate::conflict::{Conflict, first_conflict};
+use self::low_level::{Heuristic, Problem, pareto_paths};
+use self::node::{Combinations, Node, ParetoSet};
+use crate::cbs::Splitting;
+use crate::conflict::Conflict;
 use crate::constraint::{Constraint, ConstraintSet};
 use crate::graph::{Graph, Vertex};
-use crate::instance::Instance;
-use crate::path::Path;
+use crate::instance::{AgentId, Instance};
+use crate::mstar::{MStarConfig, mstar_with};
+use crate::path::{Objective, Path};
+use crate::solution::Outcome;
 
 /// Which multi-objective search the low level runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -64,11 +75,34 @@ pub enum LowLevel {
     NamoaDr,
 }
 
-/// How [`mo_cbs_with`] orders the high-level search and which low level it uses.
+/// How [`mo_cbs_with`] orders the high-level search, which low level it uses and which
+/// improvements it applies.
 ///
 /// Every configuration returns the same front; they differ in effort. The default is
-/// [`MoCbsConfig::tree_by_tree`], what [`mo_cbs`] uses.
+/// [`MoCbsConfig::improved`], what [`mo_cbs`] uses.
+///
+/// ```
+/// use mapf_search::{Agent, Grid, Instance, Limits, MoCbsConfig, ParetoOutcome, mo_cbs_with};
+///
+/// // Two agents swap the ends of a corridor: no plan exists.
+/// let grid = Grid::new(3, 1);
+/// let agents = vec![Agent { start: 0, goal: 2 }, Agent { start: 2, goal: 0 }];
+/// let instance = Instance::new(grid, agents)?;
+/// let costs = |_: usize, _: usize| [1, 1];
+///
+/// // The paper's MO-CBS only stops at its budget; the feasibility check proves it.
+/// let plain = mo_cbs_with(&instance, &costs, MoCbsConfig::plain(), Limits::expansions(100));
+/// let improved = mo_cbs_with(&instance, &costs, MoCbsConfig::improved(), Limits::NONE);
+///
+/// assert_eq!(plain.outcome, ParetoOutcome::LimitReached);
+/// assert_eq!(improved.outcome, ParetoOutcome::Unsolvable);
+/// # Ok::<(), mapf_search::InstanceError>(())
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent on-off switches, each documented, as in CbsConfig"
+)]
 pub struct MoCbsConfig {
     /// Tree-by-tree expansion (MO-CBS-t): generate one root at a time and exhaust its tree
     /// before the next. Plain MO-CBS generates every root up front, which is the product
@@ -76,39 +110,74 @@ pub struct MoCbsConfig {
     pub tree_by_tree: bool,
     /// The single-agent multi-objective planner.
     pub low_level: LowLevel,
+    /// Before the search, prove infeasible instances [`ParetoOutcome::Unsolvable`] (paper,
+    /// Sec. VII-B): feasibility does not depend on the costs, so recursive M* with unit
+    /// costs decides it, under the same budget with M*'s counters. If that budget runs out,
+    /// the search goes on without the proof.
+    pub feasibility_check: bool,
+    /// Split cardinal conflicts first, then semi-cardinal ones, then the rest (earliest
+    /// first within a class). A conflict is cardinal for an agent if every path of the
+    /// agent's current Pareto set takes part in it.
+    pub prioritize_conflicts: bool,
+    /// Bypass: when a child's replanned agents each have a path of the parent's cost that
+    /// leaves fewer conflicts, take those paths over instead of splitting.
+    pub bypass: bool,
+    /// How a conflict is split into children. [`Splitting::Disjoint`] constrains the agent
+    /// for which the conflict is cardinal if only one is, else the conflict's first agent.
+    pub splitting: Splitting,
 }
 
 impl MoCbsConfig {
-    /// Plain MO-CBS: all roots up front, BOA* for two objectives.
+    /// Plain MO-CBS, Alg. 1 of the paper: all roots up front, BOA* for two objectives, no
+    /// improvements.
     #[must_use]
     pub const fn plain() -> Self {
         Self {
             tree_by_tree: false,
             low_level: LowLevel::Auto,
+            feasibility_check: false,
+            prioritize_conflicts: false,
+            bypass: false,
+            splitting: Splitting::Standard,
         }
     }
 
-    /// MO-CBS-t: one tree at a time, BOA* for two objectives. What [`mo_cbs`] uses.
+    /// MO-CBS-t, as in the paper: one tree at a time, BOA* for two objectives, no
+    /// improvements.
     #[must_use]
     pub const fn tree_by_tree() -> Self {
         Self {
             tree_by_tree: true,
+            ..Self::plain()
+        }
+    }
+
+    /// MO-CBS-t with the feasibility check, conflict prioritization, bypass and disjoint
+    /// splitting. What [`mo_cbs`] uses.
+    #[must_use]
+    pub const fn improved() -> Self {
+        Self {
+            tree_by_tree: true,
             low_level: LowLevel::Auto,
+            feasibility_check: true,
+            prioritize_conflicts: true,
+            bypass: true,
+            splitting: Splitting::Disjoint,
         }
     }
 }
 
 impl Default for MoCbsConfig {
     fn default() -> Self {
-        Self::tree_by_tree()
+        Self::improved()
     }
 }
 
 /// One Pareto-optimal joint plan.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParetoSolution<const N: usize> {
-    /// The conflict-free path of each agent, indexed by [`AgentId`](crate::AgentId), from
-    /// its start to its goal, where it stays.
+    /// The conflict-free path of each agent, indexed by [`AgentId`], from its start to its
+    /// goal, where it stays.
     pub paths: Vec<Path>,
     /// The sum over agents of the cost vectors of their moves and waits up to their final
     /// arrival.
@@ -121,13 +190,13 @@ pub enum ParetoOutcome {
     /// The front is the complete Pareto-optimal front: one plan per Pareto-optimal cost
     /// vector.
     Complete,
-    /// Proven unsolvable: an agent cannot reach its goal even alone, or the search ran out
-    /// of nodes without a solution.
+    /// Proven unsolvable: by the feasibility check, because an agent cannot reach its goal
+    /// even alone, or because the search ran out of nodes without a solution.
     Unsolvable,
     /// The [`Budget`] stopped the search. The front holds the conflict-free plans found so
     /// far, mutually non-dominated, but a later plan might have dominated some of them, and
-    /// cost vectors may be missing. As with CBS, some unsolvable instances only ever end
-    /// this way.
+    /// cost vectors may be missing. Without the feasibility check, some unsolvable instances
+    /// only ever end this way.
     LimitReached,
 }
 
@@ -139,12 +208,13 @@ pub struct ParetoResult<const N: usize> {
     /// The plans found, sorted lexicographically by cost, at most one per cost vector.
     /// Empty unless a solution was found.
     pub front: Vec<ParetoSolution<N>>,
-    /// High-level counters: expanded (split) nodes in [`Stats::expanded`], created nodes
-    /// (roots and children, filtered or not) in [`Stats::generated`].
+    /// High-level counters: expanded (split) nodes, bypasses included, in
+    /// [`Stats::expanded`], and created nodes (roots and children, filtered or not) in
+    /// [`Stats::generated`]. The feasibility check's counters are not included.
     pub stats: Stats,
 }
 
-/// [`mo_cbs_with`] with [`MoCbsConfig::tree_by_tree`]: every Pareto-optimal plan of
+/// [`mo_cbs_with`] with [`MoCbsConfig::improved`]: every Pareto-optimal plan of
 /// `instance`.
 ///
 /// `costs(from, to)` is the cost vector of a move along the edge `from -> to`, and
@@ -175,19 +245,22 @@ pub fn mo_cbs<G: Graph, const N: usize>(
     costs: &impl Fn(Vertex, Vertex) -> [u32; N],
     budget: impl Budget<Stats>,
 ) -> ParetoResult<N> {
-    mo_cbs_with(instance, costs, MoCbsConfig::tree_by_tree(), budget)
+    mo_cbs_with(instance, costs, MoCbsConfig::improved(), budget)
 }
 
 /// Multi-objective CBS: every cost-unique Pareto-optimal plan of `instance` under the
-/// vector costs `costs` (see [`mo_cbs`]), searched as `config` says.
+/// vector costs `costs`, shared by all agents (see [`mo_cbs`]), searched as `config` says.
 ///
 /// Every cost component should be positive, waits included, as the paper requires: the
 /// search then terminates on every solvable instance. With zero components a returned
 /// [`ParetoOutcome::Complete`] front is still exact, but the search may not end on its
 /// own. Sums must fit in `u32`.
 ///
-/// `budget` is asked before every high-level expansion and before every root of plain
-/// MO-CBS; the low level runs to completion on every call.
+/// `budget` is asked before every high-level expansion, before every root of plain
+/// MO-CBS, and inside the low level, before its first expansion and every 256 after; a
+/// stop there ends the run with [`ParetoOutcome::LimitReached`]. The low level sees the
+/// high-level counters, so a [`Limits`](crate::Limits) budget stops it only when those
+/// are exhausted, while a deadline or a cancellation flag in a closure stops it at once.
 ///
 /// # Examples
 ///
@@ -214,10 +287,42 @@ pub fn mo_cbs_with<G: Graph, const N: usize>(
     instance: &Instance<G>,
     costs: &impl Fn(Vertex, Vertex) -> [u32; N],
     config: MoCbsConfig,
+    budget: impl Budget<Stats>,
+) -> ParetoResult<N> {
+    mo_cbs_per_agent(instance, &|_, from, to| costs(from, to), config, budget)
+}
+
+/// [`mo_cbs_with`] with one cost function per agent: `costs(agent, from, to)` is what the
+/// move (or, if `from == to`, the wait) costs `agent`.
+///
+/// # Examples
+///
+/// ```
+/// use mapf_search::{AdjacencyList, Agent, Instance, Limits, MoCbsConfig, mo_cbs_per_agent};
+///
+/// // A diamond with an upper and a lower route: agent 0 finds the upper one cheap, any
+/// // other agent the lower one.
+/// let graph = AdjacencyList::undirected(4, &[(0, 1), (1, 3), (0, 2), (2, 3)]);
+/// let agents = vec![Agent { start: 0, goal: 3 }];
+/// let instance = Instance::new(graph, agents)?;
+/// let costs = |agent: usize, from: usize, to: usize| {
+///     let upper = from == 1 || to == 1;
+///     if upper == (agent == 0) { [1, 1] } else { [2, 2] }
+/// };
+///
+/// let result = mo_cbs_per_agent(&instance, &costs, MoCbsConfig::improved(), Limits::NONE);
+/// assert_eq!(result.front[0].paths[0], [0, 1, 3]);
+/// assert_eq!(result.front[0].cost, [2, 2]);
+/// # Ok::<(), mapf_search::InstanceError>(())
+/// ```
+pub fn mo_cbs_per_agent<G: Graph, const N: usize>(
+    instance: &Instance<G>,
+    costs: &impl Fn(AgentId, Vertex, Vertex) -> [u32; N],
+    config: MoCbsConfig,
     mut budget: impl Budget<Stats>,
 ) -> ParetoResult<N> {
-    let mut search = Search::new(instance, costs, config);
-    let outcome = search.run(&mut budget);
+    let mut search = Search::new(instance, costs, config, &mut budget);
+    let outcome = search.run();
     let mut front = search.front;
     front.sort_by_key(|plan| plan.cost);
 
@@ -228,47 +333,31 @@ pub fn mo_cbs_with<G: Graph, const N: usize>(
     }
 }
 
-/// A shared path with its cost vector.
-type PricedPath<const N: usize> = (Rc<[Vertex]>, [u32; N]);
+/// The low level was interrupted by the budget.
+struct Interrupted;
 
-/// One high-level node.
-#[derive(Clone)]
-struct Node<const N: usize> {
-    /// All constraints on the way from the root, on any agent.
+/// A child of a split, before its nodes are built: its constraints and the new Pareto set
+/// of each agent it replans.
+struct Child<const N: usize> {
+    /// The parent's constraints plus the new one.
     constraints: Vec<Constraint>,
-    /// One path per agent, Pareto-optimal under its constraints. Shared with the parent
-    /// where the agent was not replanned.
-    paths: Vec<Rc<[Vertex]>>,
-    /// The cost vector of each path.
-    costs: Vec<[u32; N]>,
-    /// The sum of [`Node::costs`].
-    cost: [u32; N],
-}
-
-impl<const N: usize> Node<N> {
-    /// A node of `paths` with their `costs` under `constraints`.
-    fn new(constraints: Vec<Constraint>, paths: Vec<Rc<[Vertex]>>, costs: Vec<[u32; N]>) -> Self {
-        let cost = costs.iter().fold([0; N], |sum, &c| add(sum, c));
-
-        Self {
-            constraints,
-            paths,
-            costs,
-            cost,
-        }
-    }
+    /// The replanned agents with their Pareto sets under [`Child::constraints`]; none
+    /// empty.
+    replanned: Vec<(AgentId, ParetoSet<N>)>,
 }
 
 /// The state of one MO-CBS run.
 struct Search<'a, G, F, const N: usize> {
     /// The instance being solved.
     instance: &'a Instance<G>,
-    /// The cost vector of each move and wait.
+    /// The cost vector of each move and wait, per agent.
     costs: &'a F,
-    /// Expansion order and low level.
+    /// Expansion order, low level and improvements.
     config: MoCbsConfig,
     /// The low-level heuristic of each agent.
     heuristics: Vec<Heuristic<N>>,
+    /// The caller's budget, shared with the low level's interrupt hook.
+    budget: RefCell<&'a mut dyn Budget<Stats>>,
     /// The open nodes by cost, then creation order: lexicographically smallest first.
     open: BTreeMap<([u32; N], u64), Node<N>>,
     /// The solutions found so far (the paper's `C`), mutually non-dominated, at most one
@@ -278,14 +367,20 @@ struct Search<'a, G, F, const N: usize> {
     stats: Stats,
 }
 
-impl<'a, G: Graph, F: Fn(Vertex, Vertex) -> [u32; N], const N: usize> Search<'a, G, F, N> {
+impl<'a, G: Graph, F: Fn(AgentId, Vertex, Vertex) -> [u32; N], const N: usize> Search<'a, G, F, N> {
     /// Prepares a run: computes the heuristic tables.
-    fn new(instance: &'a Instance<G>, costs: &'a F, config: MoCbsConfig) -> Self {
+    fn new(
+        instance: &'a Instance<G>,
+        costs: &'a F,
+        config: MoCbsConfig,
+        budget: &'a mut dyn Budget<Stats>,
+    ) -> Self {
         let graph = instance.graph();
         let heuristics = instance
             .agents()
             .iter()
-            .map(|agent| Heuristic::new(graph, costs, agent.goal))
+            .enumerate()
+            .map(|(id, agent)| Heuristic::new(graph, &|u, v| costs(id, u, v), agent.goal))
             .collect();
 
         Self {
@@ -293,6 +388,7 @@ impl<'a, G: Graph, F: Fn(Vertex, Vertex) -> [u32; N], const N: usize> Search<'a,
             costs,
             config,
             heuristics,
+            budget: RefCell::new(budget),
             open: BTreeMap::new(),
             front: Vec::new(),
             stats: Stats::default(),
@@ -300,14 +396,20 @@ impl<'a, G: Graph, F: Fn(Vertex, Vertex) -> [u32; N], const N: usize> Search<'a,
     }
 
     /// Runs the search to its end (Alg. 1 of the paper).
-    fn run(&mut self, budget: &mut impl Budget<Stats>) -> ParetoOutcome {
-        let Some(mut roots) = self.roots() else {
+    fn run(&mut self) -> ParetoOutcome {
+        if self.config.feasibility_check && self.is_proven_infeasible() {
             return ParetoOutcome::Unsolvable;
+        }
+
+        let mut roots = match self.roots() {
+            Ok(Some(roots)) => roots,
+            Ok(None) => return ParetoOutcome::Unsolvable,
+            Err(Interrupted) => return ParetoOutcome::LimitReached,
         };
 
         if !self.config.tree_by_tree {
             for root in roots.by_ref() {
-                if budget.exhausted(&self.stats) {
+                if self.is_exhausted() {
                     return ParetoOutcome::LimitReached;
                 }
 
@@ -316,7 +418,7 @@ impl<'a, G: Graph, F: Fn(Vertex, Vertex) -> [u32; N], const N: usize> Search<'a,
         }
 
         loop {
-            if !self.run_open(budget) {
+            if self.run_open().is_err() {
                 return ParetoOutcome::LimitReached;
             }
 
@@ -331,45 +433,55 @@ impl<'a, G: Graph, F: Fn(Vertex, Vertex) -> [u32; N], const N: usize> Search<'a,
         }
     }
 
-    /// The root nodes, or `None` if an agent has no path even alone.
-    fn roots(&self) -> Option<Roots<N>> {
-        let choices: Vec<Vec<PricedPath<N>>> = (0..self.instance.agents().len())
-            .map(|agent| {
-                self.replan(agent, &[])
-                    .into_iter()
-                    .map(|(path, cost)| (Rc::from(path), cost))
-                    .collect::<Vec<_>>()
-            })
-            .collect();
+    /// Returns `true` if recursive M* proves that no conflict-free plan exists. M* gets
+    /// the budget with its own counters.
+    fn is_proven_infeasible(&self) -> bool {
+        let config = MStarConfig::recursive(Objective::SumOfCosts);
+        let budget = |stats: &Stats| self.budget.borrow_mut().exhausted(stats);
 
-        if choices.iter().any(Vec::is_empty) {
-            return None;
-        }
-
-        Some(Roots::new(choices))
+        mstar_with(self.instance, config, budget).outcome == Outcome::Unsolvable
     }
 
-    /// Pops and handles open nodes until the open list is empty. Returns `false` if the
-    /// budget stopped it.
-    fn run_open(&mut self, budget: &mut impl Budget<Stats>) -> bool {
+    /// Returns `true` if the budget says stop, given the high-level counters.
+    fn is_exhausted(&self) -> bool {
+        self.budget.borrow_mut().exhausted(&self.stats)
+    }
+
+    /// The root nodes; `None` if an agent has no path even alone.
+    fn roots(&self) -> Result<Option<Combinations<N>>, Interrupted> {
+        let mut sets = Vec::new();
+        for agent in 0..self.instance.agents().len() {
+            let set = self.replan(agent, &[])?;
+            if set.is_empty() {
+                return Ok(None);
+            }
+
+            sets.push(set);
+        }
+
+        Ok(Some(Combinations::roots(sets)))
+    }
+
+    /// Pops and handles open nodes until the open list is empty.
+    fn run_open(&mut self) -> Result<(), Interrupted> {
         while let Some((_, node)) = self.open.pop_first() {
             if self.is_filtered(&node.cost) {
                 continue;
             }
 
-            let Some(conflict) = first_conflict(&node.paths) else {
+            let Some(conflict) = split::choose(&node, self.config.prioritize_conflicts) else {
                 self.record(&node);
                 continue;
             };
 
-            if budget.exhausted(&self.stats) {
-                return false;
+            if self.is_exhausted() {
+                return Err(Interrupted);
             }
 
-            self.expand(&node, conflict);
+            self.expand(&node, conflict)?;
         }
 
-        true
+        Ok(())
     }
 
     /// Returns `true` if a solution found so far weakly dominates `cost` (the paper's
@@ -390,37 +502,85 @@ impl<'a, G: Graph, F: Fn(Vertex, Vertex) -> [u32; N], const N: usize> Search<'a,
         });
     }
 
-    /// Splits `conflict` of `node` into one constraint per agent and opens one child per
-    /// Pareto-optimal path of the constrained agent.
-    fn expand(&mut self, node: &Node<N>, conflict: Conflict) {
+    /// Splits `conflict` of `node` and opens the children: one node per combination of
+    /// the replanned agents' Pareto paths, or, with bypass, `node` with better paths.
+    fn expand(&mut self, node: &Node<N>, conflict: Conflict) -> Result<(), Interrupted> {
         self.stats.expanded += 1;
 
-        for constraint in Constraint::resolving(conflict) {
-            let agent = constraint.agent();
-            let mut constraints = node.constraints.clone();
-            constraints.push(constraint);
-
-            for (path, cost) in self.replan(agent, &constraints) {
-                let mut paths = node.paths.clone();
-                let mut costs = node.costs.clone();
-                paths[agent] = Rc::from(path);
-                costs[agent] = cost;
-
-                self.push(Node::new(constraints.clone(), paths, costs));
+        let mut children = Vec::new();
+        for constraint in split::constraints(node, conflict, self.config.splitting) {
+            if let Some(child) = self.child(node, constraint)? {
+                children.push(child);
             }
         }
+
+        if self.config.bypass {
+            if let Some(adopted) = children.iter().find_map(|child| split::bypass(node, child)) {
+                self.push(adopted);
+                return Ok(());
+            }
+        }
+
+        for child in children {
+            for grandchild in Combinations::children(node, child) {
+                self.push(grandchild);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// The child of `node` with `constraint` added; `None` if an agent it replans has no
+    /// path.
+    ///
+    /// A negative constraint replans its agent. A positive one keeps its agent's path,
+    /// which takes part in the conflict and so meets it, and replans every other agent
+    /// whose path breaks what it implies for them.
+    fn child(
+        &self,
+        node: &Node<N>,
+        constraint: Constraint,
+    ) -> Result<Option<Child<N>>, Interrupted> {
+        let mut constraints = node.constraints.clone();
+        constraints.push(constraint);
+
+        let mut replanned = Vec::new();
+        for agent in split::affected(constraint, &node.paths) {
+            let set = self.replan(agent, &constraints)?;
+            if set.is_empty() {
+                return Ok(None);
+            }
+
+            replanned.push((agent, set));
+        }
+
+        Ok(Some(Child {
+            constraints,
+            replanned,
+        }))
     }
 
     /// The Pareto-optimal paths of `agent` under `constraints`.
-    fn replan(&self, agent: usize, constraints: &[Constraint]) -> Vec<(Path, [u32; N])> {
-        pareto_paths(
-            self.instance.graph(),
-            self.costs,
-            self.instance.agents()[agent],
-            &ConstraintSet::for_agent(agent, constraints),
-            &self.heuristics[agent],
-            self.config.low_level,
-        )
+    fn replan(
+        &self,
+        agent: AgentId,
+        constraints: &[Constraint],
+    ) -> Result<ParetoSet<N>, Interrupted> {
+        let costs = |from, to| (self.costs)(agent, from, to);
+        let problem = Problem {
+            graph: self.instance.graph(),
+            costs: &costs,
+            agent: self.instance.agents()[agent],
+            heuristic: &self.heuristics[agent],
+            low_level: self.config.low_level,
+        };
+        let set = ConstraintSet::for_agent(agent, constraints);
+        let paths = pareto_paths(&problem, &set, &mut || self.is_exhausted()).ok_or(Interrupted)?;
+
+        Ok(paths
+            .into_iter()
+            .map(|(path, cost)| (Rc::from(path), cost))
+            .collect())
     }
 
     /// Opens `node` unless it is filtered.
@@ -434,78 +594,13 @@ impl<'a, G: Graph, F: Fn(Vertex, Vertex) -> [u32; N], const N: usize> Search<'a,
     }
 }
 
-/// The root nodes: every combination of one unconstrained Pareto-optimal path per agent,
-/// generated on demand in mixed-radix order (the last agent's choice varies fastest).
-struct Roots<const N: usize> {
-    /// The Pareto-optimal paths of each agent with their costs. None is empty.
-    choices: Vec<Vec<PricedPath<N>>>,
-    /// The choice index of each agent for the next root; `None` once all are generated.
-    next: Option<Vec<usize>>,
-}
-
-impl<const N: usize> Roots<N> {
-    /// The roots over `choices`, starting with the first path of every agent.
-    fn new(choices: Vec<Vec<PricedPath<N>>>) -> Self {
-        let next = Some(vec![0; choices.len()]);
-
-        Self { choices, next }
-    }
-
-    /// Advances `indices` to the next combination; `false` after the last one.
-    fn advance(&self, indices: &mut [usize]) -> bool {
-        for (agent, index) in indices.iter_mut().enumerate().rev() {
-            *index += 1;
-            if *index < self.choices[agent].len() {
-                return true;
-            }
-
-            *index = 0;
-        }
-
-        false
-    }
-}
-
-impl<const N: usize> Iterator for Roots<N> {
-    type Item = Node<N>;
-
-    fn next(&mut self) -> Option<Node<N>> {
-        let mut indices = self.next.take()?;
-        let (paths, costs) = indices
-            .iter()
-            .zip(&self.choices)
-            .map(|(&index, choices)| choices[index].clone())
-            .unzip();
-
-        if self.advance(&mut indices) {
-            self.next = Some(indices);
-        }
-
-        Some(Node::new(Vec::new(), paths, costs))
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    //! Unit tests for the root enumeration and the front's Filter and Update.
+    //! Unit tests for the front's Filter and Update.
 
     use super::*;
     use crate::graph::AdjacencyList;
     use crate::instance::Agent;
-
-    /// Two agents with two and three paths give six roots, each combination once.
-    #[test]
-    fn roots_enumerate_the_product() {
-        let path = |v: Vertex| -> Rc<[Vertex]> { Rc::from(vec![v]) };
-        let roots = Roots::new(vec![
-            vec![(path(0), [1]), (path(1), [2])],
-            vec![(path(5), [10]), (path(6), [20]), (path(7), [30])],
-        ]);
-
-        let costs: Vec<[u32; 1]> = roots.map(|node| node.cost).collect();
-
-        assert_eq!(costs, [[11], [21], [31], [12], [22], [32]]);
-    }
 
     /// Update drops a recorded solution that a later one dominates, and Filter then drops
     /// nodes the new solution weakly dominates. The random properties rarely reach this:
@@ -513,10 +608,15 @@ mod tests {
     #[test]
     fn record_drops_dominated_solutions() {
         let graph = AdjacencyList::undirected(2, &[(0, 1)]);
-        let instance = Instance::new(graph, vec![Agent { start: 0, goal: 1 }]).expect("valid");
-        let costs = |_: Vertex, _: Vertex| [1, 1];
-        let mut search = Search::new(&instance, &costs, MoCbsConfig::default());
-        let node = |cost: [u32; 2]| Node::new(Vec::new(), vec![Rc::from(vec![0, 1])], vec![cost]);
+        let instance =
+            Instance::new(graph, alloc::vec![Agent { start: 0, goal: 1 }]).expect("valid");
+        let costs = |_: AgentId, _: Vertex, _: Vertex| [1, 1];
+        let mut budget = |_: &Stats| false;
+        let mut search = Search::new(&instance, &costs, MoCbsConfig::default(), &mut budget);
+        let node = |cost: [u32; 2]| {
+            let path: Rc<[Vertex]> = Rc::from(alloc::vec![0, 1]);
+            Node::new(Vec::new(), alloc::vec![path], alloc::vec![cost], Vec::new())
+        };
 
         search.record(&node([3, 3]));
         search.record(&node([1, 5]));

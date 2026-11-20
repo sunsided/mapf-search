@@ -4,7 +4,7 @@
 //! `multiobjective-search`.
 //!
 //! Joint states are those of [`crate::oracle`]: positions plus a "finished" mask. An
-//! unfinished agent pays `costs(from, to)` per step, a wait `costs(v, v)`; finishing at its
+//! unfinished agent pays `costs(agent, from, to)` per step, a wait `costs(agent, v, v)`; finishing at its
 //! goal and every later step are free. Labels are popped in lexicographic cost order; a
 //! label that a permanent label at its state, or a found solution, weakly dominates is
 //! dropped. The joint space is finite and every antichain of cost vectors is finite, so
@@ -28,7 +28,8 @@ fn plus<const N: usize>(a: [u32; N], b: [u32; N]) -> [u32; N] {
 }
 
 /// The cost-unique Pareto-optimal front of `agents` on `graph` under `costs`, sorted
-/// lexicographically; empty if the instance is unsolvable.
+/// lexicographically; empty if the instance is unsolvable. `costs(agent, from, to)` is
+/// what a move or wait costs `agent`.
 ///
 /// # Panics
 ///
@@ -36,7 +37,7 @@ fn plus<const N: usize>(a: [u32; N], b: [u32; N]) -> [u32; N] {
 pub fn pareto_front<G: Graph, const N: usize>(
     graph: &G,
     agents: &[Agent],
-    costs: &impl Fn(Vertex, Vertex) -> [u32; N],
+    costs: &impl Fn(usize, Vertex, Vertex) -> [u32; N],
 ) -> Vec<[u32; N]> {
     assert!(agents.len() < 32, "the oracle handles at most 31 agents");
 
@@ -79,11 +80,19 @@ pub fn pareto_front<G: Graph, const N: usize>(
 fn successors<G: Graph, const N: usize>(
     graph: &G,
     agents: &[Agent],
-    costs: &impl Fn(Vertex, Vertex) -> [u32; N],
+    costs: &impl Fn(usize, Vertex, Vertex) -> [u32; N],
     state: &JointState,
 ) -> Vec<(JointState, [u32; N])> {
     let options: Vec<Vec<(Choice, [u32; N])>> = (0..agents.len())
-        .map(|index| choices(graph, agents[index], costs, state, index))
+        .map(|index| {
+            choices(
+                graph,
+                agents[index],
+                &|u, v| costs(index, u, v),
+                state,
+                index,
+            )
+        })
         .collect();
     let mut out = Vec::new();
     combine(state, &options, &mut Vec::new(), [0; N], &mut out);
@@ -155,17 +164,18 @@ fn combine<const N: usize>(
 pub fn plan_cost<const N: usize>(
     agents: &[Agent],
     paths: &[Vec<Vertex>],
-    costs: &impl Fn(Vertex, Vertex) -> [u32; N],
+    costs: &impl Fn(usize, Vertex, Vertex) -> [u32; N],
 ) -> [u32; N] {
     agents
         .iter()
         .zip(paths)
-        .flat_map(|(agent, path)| {
+        .enumerate()
+        .flat_map(|(index, (agent, path))| {
             let arrived = usize::try_from(arrival(path, agent.goal)).expect("short paths");
 
             path.windows(2)
                 .take(arrived)
-                .map(|step| costs(step[0], step[1]))
+                .map(move |step| costs(index, step[0], step[1]))
         })
         .fold([0; N], plus)
 }
