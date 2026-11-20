@@ -64,7 +64,7 @@ use crate::solution::{MapfResult, Outcome, Solution};
 /// assert_eq!(solution.sum_of_costs, 5);
 /// # Ok::<(), mapf_search::InstanceError>(())
 /// ```
-pub fn pbs<G: Graph>(instance: &Instance<G>, mut budget: impl Budget) -> MapfResult {
+pub fn pbs<G: Graph>(instance: &Instance<G>, mut budget: impl Budget<Stats>) -> MapfResult {
     let mut search = Search {
         instance,
         distances: distance_tables(instance.graph(), instance.agents()),
@@ -102,7 +102,7 @@ struct Search<'a, G> {
 
 impl<G: Graph> Search<'_, G> {
     /// Runs the depth-first search to its end.
-    fn run(&mut self, budget: &mut impl Budget) -> Outcome {
+    fn run(&mut self, budget: &mut impl Budget<Stats>) -> Outcome {
         let Some(root) = self.root() else {
             return Outcome::Unsolvable;
         };

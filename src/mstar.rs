@@ -72,7 +72,7 @@ use crate::solution::{MapfResult, Outcome, Solution};
 /// assert_eq!(mstar(&instance, Limits::NONE).outcome, Outcome::Unsolvable);
 /// # Ok::<(), mapf_search::InstanceError>(())
 /// ```
-pub fn mstar<G: Graph>(instance: &Instance<G>, mut budget: impl Budget) -> MapfResult {
+pub fn mstar<G: Graph>(instance: &Instance<G>, mut budget: impl Budget<Stats>) -> MapfResult {
     let distances = distance_tables(instance.graph(), instance.agents());
     let mut search = Search {
         policy: policies(instance.graph(), &distances),
@@ -149,7 +149,7 @@ struct Search<'a, G> {
 
 impl<G: Graph> Search<'_, G> {
     /// Runs the search to its end.
-    fn run(&mut self, budget: &mut impl Budget) -> Outcome {
+    fn run(&mut self, budget: &mut impl Budget<Stats>) -> Outcome {
         let start: JointState = self
             .instance
             .agents()

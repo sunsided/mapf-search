@@ -65,7 +65,7 @@ use crate::solution::{MapfResult, Outcome, Solution};
 /// assert_eq!(result.solution().expect("solvable").sum_of_costs, 7);
 /// # Ok::<(), mapf_search::InstanceError>(())
 /// ```
-pub fn icts<G: Graph>(instance: &Instance<G>, mut budget: impl Budget) -> MapfResult {
+pub fn icts<G: Graph>(instance: &Instance<G>, mut budget: impl Budget<Stats>) -> MapfResult {
     let mut search = Search {
         instance,
         distances: distance_tables(instance.graph(), instance.agents()),
@@ -94,7 +94,7 @@ struct Search<'a, G> {
 
 impl<G: Graph> Search<'_, G> {
     /// Runs the high-level search to its end.
-    fn run(&mut self, budget: &mut impl Budget) -> Outcome {
+    fn run(&mut self, budget: &mut impl Budget<Stats>) -> Outcome {
         let Some(root) = self.individual_costs() else {
             return Outcome::Unsolvable;
         };

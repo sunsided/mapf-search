@@ -64,7 +64,7 @@ use crate::solution::{MapfResult, Outcome, Solution};
 pub fn ecbs<G: Graph>(
     instance: &Instance<G>,
     weight: Weight,
-    mut budget: impl Budget,
+    mut budget: impl Budget<Stats>,
 ) -> MapfResult {
     assert!(
         weight.numerator() >= weight.denominator(),
@@ -135,7 +135,7 @@ struct Search<'a, G> {
 
 impl<G: Graph> Search<'_, G> {
     /// Runs the high-level search to its end.
-    fn run(&mut self, budget: &mut impl Budget) -> Outcome {
+    fn run(&mut self, budget: &mut impl Budget<Stats>) -> Outcome {
         let Some(root) = self.root() else {
             return Outcome::Unsolvable;
         };

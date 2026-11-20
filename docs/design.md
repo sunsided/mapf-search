@@ -449,7 +449,7 @@ pub fn focal_search<G, T, H, F>(
     heuristic: H,
     focal: F,
     weight: Weight,
-    budget: impl Budget,
+    budget: impl Budget<Stats>,
 ) -> FocalResult<G>
 where
     G: Successors,

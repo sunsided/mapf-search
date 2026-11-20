@@ -126,7 +126,7 @@ impl CbsConfig {
 pub fn cbs<G: Graph>(
     instance: &Instance<G>,
     objective: Objective,
-    budget: impl Budget,
+    budget: impl Budget<Stats>,
 ) -> MapfResult {
     cbs_with(instance, CbsConfig::improved(objective), budget)
 }
@@ -164,7 +164,7 @@ pub fn cbs<G: Graph>(
 pub fn cbs_with<G: Graph>(
     instance: &Instance<G>,
     config: CbsConfig,
-    mut budget: impl Budget,
+    mut budget: impl Budget<Stats>,
 ) -> MapfResult {
     let mut search = Search::new(instance, config);
     let outcome = search.run(&mut budget);
@@ -254,7 +254,7 @@ impl<'a, G: Graph> Search<'a, G> {
     }
 
     /// Runs the high-level search to its end.
-    fn run(&mut self, budget: &mut impl Budget) -> Outcome {
+    fn run(&mut self, budget: &mut impl Budget<Stats>) -> Outcome {
         let Some(root) = self.root() else {
             return Outcome::Unsolvable;
         };
