@@ -17,6 +17,7 @@ categories = ["algorithms", "science::robotics", "no-std"]
 heuristic-search = { path = "../heuristic-search", version = "0.0.0" }
 
 [dev-dependencies]
+criterion = { version = "0.7", default-features = false }
 proptest = "1.12"
 
 [lints.rust]

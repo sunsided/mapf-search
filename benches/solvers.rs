@@ -1,16 +1,13 @@
-//! A dependency-free benchmark: every solver on one fixed 8x8 instance with eight agents,
-//! timed with `std::time::Instant` over a few runs. Run with `cargo bench`.
+//! Benchmarks: every solver on one fixed 8x8 instance with eight agents. Run with
+//! `cargo bench`.
 
 use std::hint::black_box;
-use std::time::{Duration, Instant};
 
+use criterion::Criterion;
 use mapf_search::{
     Agent, CbsConfig, Grid, Instance, Limits, MapfResult, Objective, Weight, cbs_with, ecbs, icts,
     mstar, pbs,
 };
-
-/// How often each solver runs; the fastest run is reported.
-const RUNS: usize = 5;
 
 /// The benchmark instance: eight agents crossing an 8x8 map with a few walls.
 fn instance() -> Instance<Grid> {
@@ -36,46 +33,32 @@ fn instance() -> Instance<Grid> {
     Instance::new(grid, agents).expect("valid")
 }
 
-/// The fastest of [`RUNS`] runs of `solve`, and its last result.
-fn time(solve: impl Fn() -> MapfResult) -> (Duration, MapfResult) {
-    let mut best = Duration::MAX;
-    let mut result = None;
-    for _ in 0..RUNS {
-        let start = Instant::now();
-        let outcome = black_box(solve());
-        best = best.min(start.elapsed());
-        result = Some(outcome);
-    }
-
-    (best, result.expect("at least one run"))
-}
-
-/// Times every solver and prints one line each.
+/// Benchmarks every solver.
 fn main() {
     let instance = instance();
     let budget = || Limits::expansions(100_000);
     let soc = Objective::SumOfCosts;
     let solvers: [(&str, &dyn Fn() -> MapfResult); 6] = [
-        ("cbs (plain)", &|| {
+        ("cbs plain", &|| {
             cbs_with(&instance, CbsConfig::plain(soc), budget())
         }),
-        ("cbs (improved)", &|| {
+        ("cbs improved", &|| {
             cbs_with(&instance, CbsConfig::improved(soc), budget())
         }),
-        ("ecbs (w = 1.5)", &|| {
+        ("ecbs w=1.5", &|| {
             ecbs(&instance, Weight::new(3, 2), budget())
         }),
         ("pbs", &|| pbs(&instance, budget())),
         ("icts", &|| icts(&instance, budget())),
-        ("m*", &|| mstar(&instance, budget())),
+        ("mstar", &|| mstar(&instance, budget())),
     ];
 
+    // M* takes about 0.3 s per run; ten samples keep the whole run short.
+    let mut c = Criterion::default().sample_size(10).configure_from_args();
     for (name, solve) in solvers {
-        let (elapsed, result) = time(solve);
-        let cost = result.solution().map(|s| s.sum_of_costs);
-        println!(
-            "{name:<16} {elapsed:>12.3?}  sum of costs {cost:?}, {} expanded",
-            result.stats.expanded
-        );
+        assert!(solve().solution().is_some(), "{name} solves the benchmark");
+        c.bench_function(name, |b| b.iter(|| black_box(solve())));
     }
+
+    c.final_summary();
 }

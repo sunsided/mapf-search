@@ -183,7 +183,7 @@ conflicts with other agents' paths, Sharon et al. 2015) needs a secondary key; s
 Its API fits without changes: `Successors` with a callback is the time-expanded adapter,
 `Goal` and `Heuristic` are closures, `Cost = u32`, and `Outcome::Unsolvable` with the
 horizon is a proof. The crate depends on it through a path dependency on the sibling
-draft (`../heuristic-search`, branch `draft/initial`, at `b5cc485` when this was last updated).
+draft (`../heuristic-search`, branch `draft/initial`, at `58ba6ec` when this was last updated).
 **The path dependency must become a crates.io version before `mapf-search` is published.**
 
 The CBS high level reuses heuristic-search's `Budget`, `Limits` and `Stats` for its own
@@ -286,8 +286,7 @@ skipped if it was already expanded with the same `g` and collision-set size.
 The joint space is finite, so M* also proves unsolvability, for example on the corridor
 swap where CBS and ICTS only hit their budget. This is basic M*: one merged collision set
 per state, not recursive M*'s independent subsets, so strongly coupled groups of more than
-a few agents are slow (the benchmark's 8-agent instance takes about 300 times as long as
-the other solvers).
+a few agents are slow (on the benchmark's 8-agent instance it is about 250 times slower than ICTS).
 
 ## Later algorithms
 
@@ -363,8 +362,10 @@ lower bound on 4-connected grids. Moves stay 4-connected, as in the MAPF benchma
 - **Parsers:** a hand-written 8x8 map with CRLF line ends and six agents, every
   `ParseErrorKind` and `ScenarioError` variant, and CBS (both objectives) on the parsed
   instance, checked by the oracle's plan checker.
-- **Benchmark:** `benches/solvers.rs` times every solver on one fixed 8x8 instance with
-  eight agents, with `std::time::Instant` and no benchmark dependency.
+- **Benchmark:** `benches/solvers.rs` (criterion, as in heuristic-search) runs every
+  solver on one fixed 8x8 instance with eight agents. All optimal solvers find sum of
+  costs 92. Typical times: CBS 0.3 ms plain and 0.4 ms improved, ECBS 0.4 ms, PBS
+  0.3 ms, ICTS 1.3 ms, M* 320 ms.
 - **Later:** real Moving AI instances with known optimal SoC from published results, as
   slow ignored tests (the benchmark files are not vendored).
 
@@ -387,9 +388,9 @@ None blocks the milestones done so far. The two API additions below belong in
 heuristic-search. Focal search is implemented locally for now (see ECBS) because both
 crates change in parallel; the lexicographic cost is not implemented here.
 
-The last drafts were built against heuristic-search's commit `b5cc485`. Its working tree
-was mid-change and did not compile at the time, so the checks ran against an export of
-that commit.
+Milestones 3 to 5 were developed against an export of heuristic-search's `b5cc485`,
+because its working tree was mid-change and did not compile at the time. The final checks
+ran against the path dependency at `58ba6ec`.
 
 ### Secondary tie-break: a lexicographic cost
 
