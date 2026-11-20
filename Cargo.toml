@@ -12,6 +12,12 @@ keywords = ["mapf", "pathfinding", "multi-agent", "cbs", "search"]
 categories = ["algorithms", "science::robotics", "no-std"]
 
 [dependencies]
+# Low-level A*. Path dependency on the sibling draft; must become a crates.io version
+# before this crate is published (see docs/design.md).
+heuristic-search = { path = "../heuristic-search", version = "0.0.0" }
+
+[dev-dependencies]
+proptest = "1.12"
 
 [lints.rust]
 missing_docs = "warn"
