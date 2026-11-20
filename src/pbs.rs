@@ -5,8 +5,8 @@
 //! that is cheapest given the paths of all agents above it, which are moving obstacles.
 //! For the earliest conflict between agents `a` and `b`, the node gets two children, "`a`
 //! above `b`" and "`b` above `a`". A child replans the newly lower agent, then, from the top
-//! down, every agent below it that now conflicts with an agent above it. The cheaper child is
-//! explored first.
+//! down, every agent below it that now conflicts with an agent above it. The child that is
+//! cheaper for the [`Objective`] is explored first.
 //!
 //! ```mermaid
 //! flowchart TD
@@ -32,10 +32,15 @@ use crate::constraint::{Constraint, ConstraintSet};
 use crate::graph::{Graph, Vertex};
 use crate::instance::{AgentId, Instance};
 use crate::low_level::{distance_tables, plan};
-use crate::path::{Path, Time, sum_of_costs};
+use crate::path::{Objective, Path, Time, makespan, sum_of_costs};
 use crate::solution::{MapfResult, Outcome, Solution};
 
-/// Finds a conflict-free plan with priority-based search, aiming at a low sum of costs.
+/// Finds a conflict-free plan with priority-based search, aiming at a low `objective`
+/// value.
+///
+/// The objective decides which child is explored first: the one with the lower objective
+/// value, ties broken by the other objective. Each agent's path is still the cheapest one
+/// given the agents above it.
 ///
 /// PBS is fast but neither optimal nor complete: it can return a plan dearer than the
 /// optimum, and it can give up ([`Outcome::Exhausted`]) on a solvable instance. It proves
@@ -49,7 +54,7 @@ use crate::solution::{MapfResult, Outcome, Solution};
 /// # Examples
 ///
 /// ```
-/// use mapf_search::{Agent, Grid, Instance, Limits, pbs, first_conflict};
+/// use mapf_search::{Agent, Grid, Instance, Limits, Objective, pbs, first_conflict};
 ///
 /// let grid = Grid::parse(&["@.@", "...", "@.@"]);
 /// let agents = vec![
@@ -58,15 +63,20 @@ use crate::solution::{MapfResult, Outcome, Solution};
 /// ];
 /// let instance = Instance::new(grid, agents)?;
 ///
-/// let result = pbs(&instance, Limits::expansions(100));
+/// let result = pbs(&instance, Objective::SumOfCosts, Limits::expansions(100));
 /// let solution = result.solution().expect("one agent goes first");
 /// assert_eq!(first_conflict(&solution.paths), None);
 /// assert_eq!(solution.sum_of_costs, 5);
 /// # Ok::<(), mapf_search::InstanceError>(())
 /// ```
-pub fn pbs<G: Graph>(instance: &Instance<G>, mut budget: impl Budget<Stats>) -> MapfResult {
+pub fn pbs<G: Graph>(
+    instance: &Instance<G>,
+    objective: Objective,
+    mut budget: impl Budget<Stats>,
+) -> MapfResult {
     let mut search = Search {
         instance,
+        objective,
         distances: distance_tables(instance.graph(), instance.agents()),
         stats: Stats::default(),
     };
@@ -86,14 +96,17 @@ struct Node {
     higher: Vec<BTreeSet<AgentId>>,
     /// One path per agent, cheapest given the paths of the agents above it.
     paths: Vec<Path>,
-    /// The sum of costs of [`Node::paths`].
-    sum_of_costs: u32,
+    /// The objective value of [`Node::paths`], then the other objective's: the order in
+    /// which children are explored.
+    cost: (u32, u32),
 }
 
 /// The state of one PBS run.
 struct Search<'a, G> {
     /// The instance being solved.
     instance: &'a Instance<G>,
+    /// What orders the children.
+    objective: Objective,
     /// Distances to each agent's goal, indexed by agent.
     distances: Vec<Vec<Option<u32>>>,
     /// Counters reported in [`MapfResult::stats`].
@@ -121,7 +134,7 @@ impl<G: Graph> Search<'_, G> {
             self.stats.expanded += 1;
             let mut children = self.children(&node, conflict);
             self.stats.generated += children.len() as u64;
-            children.sort_by_key(|child| core::cmp::Reverse(child.sum_of_costs));
+            children.sort_by_key(|child| core::cmp::Reverse(child.cost));
             stack.extend(children);
         }
 
@@ -137,7 +150,7 @@ impl<G: Graph> Search<'_, G> {
 
         Some(Node {
             higher: vec![BTreeSet::new(); count],
-            sum_of_costs: sum_of_costs(&paths),
+            cost: self.cost(&paths),
             paths,
         })
     }
@@ -168,7 +181,7 @@ impl<G: Graph> Search<'_, G> {
         }
 
         self.replan_below(&mut child, low, affected)?;
-        child.sum_of_costs = sum_of_costs(&child.paths);
+        child.cost = self.cost(&child.paths);
 
         Some(child)
     }
@@ -196,6 +209,16 @@ impl<G: Graph> Search<'_, G> {
         }
 
         Some(())
+    }
+
+    /// The objective value of `paths`, then the other objective's.
+    fn cost(&self, paths: &[Path]) -> (u32, u32) {
+        let (soc, makespan) = (sum_of_costs(paths), makespan(paths));
+
+        match self.objective {
+            Objective::SumOfCosts => (soc, makespan),
+            Objective::Makespan => (makespan, soc),
+        }
     }
 
     /// The cheapest path of `agent` that avoids the paths of `higher`, including where

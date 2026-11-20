@@ -1,5 +1,5 @@
 //! M* ([`mstar`], Wagner and Choset 2015): A* in the joint space of all agents with
-//! subdimensional expansion, optimal for sum of costs.
+//! subdimensional expansion, optimal for sum of costs or makespan ([`Objective`]).
 //!
 //! Each agent follows its individual optimal policy (a fixed shortest path to its goal)
 //! until it collides. Colliding agents join the *collision set* of the state where the
@@ -11,7 +11,9 @@
 //! vertex plus a *finished* flag. An unfinished agent at its goal may finish; from then on
 //! it stays there for free. Every other unfinished agent pays 1 per step, move or wait. So
 //! waiting at the goal before leaving it again is paid for. The heuristic, the sum of the
-//! unfinished agents' distances to their goals, is consistent.
+//! unfinished agents' distances to their goals, is consistent. For makespan a joint step
+//! costs 1 if any agent pays, and the heuristic is the largest of those distances, which is
+//! consistent too.
 //!
 //! ```mermaid
 //! flowchart TD
@@ -34,10 +36,10 @@ use heuristic_search::{Budget, Stats};
 use crate::graph::{Graph, Vertex};
 use crate::instance::{AgentId, Instance};
 use crate::low_level::distance_tables;
-use crate::path::Path;
+use crate::path::{Objective, Path};
 use crate::solution::{MapfResult, Outcome, Solution};
 
-/// Finds a conflict-free plan with the optimal sum of costs with M*.
+/// Finds a conflict-free plan with the optimal `objective` value with M*.
 ///
 /// The joint space is finite, so M* proves unsolvability by exhausting it
 /// ([`Outcome::Unsolvable`]), also where CBS and ICTS only stop at their budget, such as
@@ -48,12 +50,14 @@ use crate::solution::{MapfResult, Outcome, Solution};
 ///
 /// This is basic M*: collision sets are merged into one set per state, not recursive M*'s
 /// independent subsets, so tightly coupled groups of more than a few agents are slow.
-/// Makespan is not supported.
+///
+/// For [`Objective::Makespan`] the plan's sum of costs is not guaranteed minimal among the
+/// makespan-optimal plans.
 ///
 /// # Examples
 ///
 /// ```
-/// use mapf_search::{Agent, Grid, Instance, Limits, Outcome, mstar};
+/// use mapf_search::{Agent, Grid, Instance, Limits, Objective, Outcome, mstar};
 ///
 /// // Two agents swap the ends of a corridor with one side pocket.
 /// let grid = Grid::parse(&["...", "@.@"]);
@@ -62,19 +66,25 @@ use crate::solution::{MapfResult, Outcome, Solution};
 ///     Agent { start: grid.vertex(2, 0), goal: grid.vertex(0, 0) },
 /// ];
 /// let instance = Instance::new(grid.clone(), agents)?;
-/// let result = mstar(&instance, Limits::NONE);
+/// let result = mstar(&instance, Objective::SumOfCosts, Limits::NONE);
 /// assert_eq!(result.solution().expect("solvable").sum_of_costs, 7);
 ///
 /// // Without the pocket they cannot pass, and M* proves it.
 /// let corridor = mapf_search::Grid::parse(&["..."]);
 /// let agents = vec![Agent { start: 0, goal: 2 }, Agent { start: 2, goal: 0 }];
 /// let instance = Instance::new(corridor, agents)?;
-/// assert_eq!(mstar(&instance, Limits::NONE).outcome, Outcome::Unsolvable);
+/// let result = mstar(&instance, Objective::Makespan, Limits::NONE);
+/// assert_eq!(result.outcome, Outcome::Unsolvable);
 /// # Ok::<(), mapf_search::InstanceError>(())
 /// ```
-pub fn mstar<G: Graph>(instance: &Instance<G>, mut budget: impl Budget<Stats>) -> MapfResult {
+pub fn mstar<G: Graph>(
+    instance: &Instance<G>,
+    objective: Objective,
+    mut budget: impl Budget<Stats>,
+) -> MapfResult {
     let distances = distance_tables(instance.graph(), instance.agents());
     let mut search = Search {
+        objective,
         policy: policies(instance.graph(), &distances),
         instance,
         distances,
@@ -132,6 +142,8 @@ type Entry = Reverse<(u32, Reverse<u32>, u64, usize)>;
 struct Search<'a, G> {
     /// The instance being solved.
     instance: &'a Instance<G>,
+    /// What the search minimizes: how agents' step costs combine, and the heuristic.
+    objective: Objective,
     /// Distances to each agent's goal, indexed by agent.
     distances: Vec<Vec<Option<u32>>>,
     /// `policy[agent][vertex]`: the agent's next vertex on its individual optimal path;
@@ -228,7 +240,7 @@ impl<G: Graph> Search<'_, G> {
         let inherited = self.nodes[target].collision.clone();
         self.pass_back(id, &inherited);
 
-        let g = self.nodes[id].g + step.iter().map(|c| c.cost).sum::<u32>();
+        let g = self.nodes[id].g + self.step_cost(step);
         if g < self.nodes[target].g {
             self.nodes[target].g = g;
             self.nodes[target].parent = Some(id);
@@ -294,15 +306,32 @@ impl<G: Graph> Search<'_, G> {
         choices
     }
 
-    /// The sum of the unfinished agents' distances to their goals; `None` if one cannot
-    /// reach its goal.
+    /// The cost of the joint step `step`: the sum of the agents' costs for sum of costs, 1
+    /// if any agent pays for makespan.
+    fn step_cost(&self, step: &[Choice]) -> u32 {
+        let mut costs = step.iter().map(|c| c.cost);
+
+        match self.objective {
+            Objective::SumOfCosts => costs.sum(),
+            Objective::Makespan => u32::from(costs.any(|cost| cost > 0)),
+        }
+    }
+
+    /// The sum (for makespan: the maximum) of the unfinished agents' distances to their
+    /// goals; `None` if one cannot reach its goal.
     fn heuristic(&self, state: &JointState) -> Option<u32> {
-        state
+        let mut distances = state
             .iter()
             .zip(&self.distances)
             .filter(|((_, finished), _)| !finished)
-            .map(|(&(vertex, _), distances)| distances[vertex])
-            .sum()
+            .map(|(&(vertex, _), distances)| distances[vertex]);
+
+        match self.objective {
+            Objective::SumOfCosts => distances.sum(),
+            Objective::Makespan => {
+                distances.try_fold(0, |max: u32, distance| Some(max.max(distance?)))
+            }
+        }
     }
 
     /// Stores a new node for `state` with heuristic `h`; `g` is infinite until relaxed.

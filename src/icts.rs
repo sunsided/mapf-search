@@ -1,10 +1,15 @@
-//! Increasing cost tree search ([`icts`], Sharon et al. 2013): optimal for sum of costs.
+//! Increasing cost tree search ([`icts`], Sharon et al. 2013): optimal for sum of costs or
+//! makespan ([`Objective`]).
 //!
 //! The high level searches cost vectors `(c_1, ..., c_k)`, one cost per agent, in order of
 //! their sum, starting at every agent's individual optimum; a vector's children raise one
 //! agent's cost by 1. For each vector, the low level builds the MDD of every agent at its
 //! cost and looks for one conflict-free combination of MDD paths. Simple pairwise pruning
 //! first checks every pair of agents on its own, which rules out most vectors cheaply.
+//!
+//! For makespan the tree is a chain: the vector `(m, ..., m)` for `m` from the largest
+//! individual optimum on. An MDD of depth `m` holds every path that arrives by `m` and waits
+//! at the goal, so the first `m` with a conflict-free combination is the optimal makespan.
 //!
 //! ```mermaid
 //! flowchart TD
@@ -34,10 +39,11 @@ use crate::graph::Graph;
 use crate::instance::{AgentId, Instance};
 use crate::low_level::distance_tables;
 use crate::mdd::Mdd;
-use crate::path::{Path, Time};
+use crate::path::{Objective, Path, Time};
 use crate::solution::{MapfResult, Outcome, Solution};
 
-/// Finds a conflict-free plan with the optimal sum of costs by increasing cost tree search.
+/// Finds a conflict-free plan with the optimal `objective` value by increasing cost tree
+/// search.
 ///
 /// `budget` is asked before evaluating each cost vector; [`MapfResult::stats`] counts
 /// evaluated vectors in [`Stats::expanded`] and queued vectors (the root included) in
@@ -45,13 +51,15 @@ use crate::solution::{MapfResult, Outcome, Solution};
 /// goal even alone; on other unsolvable instances the tree is infinite and the run ends at
 /// the budget.
 ///
-/// Makespan is not supported. The search is exponential in the number of agents whose
-/// costs must rise, so ICTS suits instances where few agents interact strongly.
+/// For [`Objective::Makespan`] the plan's sum of costs is low but not guaranteed minimal
+/// among the makespan-optimal plans: the joint MDD search returns the first combination it
+/// finds. The search is exponential in the number of agents whose costs must rise, so ICTS
+/// suits instances where few agents interact strongly.
 ///
 /// # Examples
 ///
 /// ```
-/// use mapf_search::{Agent, Grid, Instance, Limits, icts};
+/// use mapf_search::{Agent, Grid, Instance, Limits, Objective, icts};
 ///
 /// // Two agents swap the ends of a corridor with one side pocket.
 /// let grid = Grid::parse(&["...", "@.@"]);
@@ -61,13 +69,18 @@ use crate::solution::{MapfResult, Outcome, Solution};
 /// ];
 /// let instance = Instance::new(grid, agents)?;
 ///
-/// let result = icts(&instance, Limits::expansions(1_000));
+/// let result = icts(&instance, Objective::SumOfCosts, Limits::expansions(1_000));
 /// assert_eq!(result.solution().expect("solvable").sum_of_costs, 7);
 /// # Ok::<(), mapf_search::InstanceError>(())
 /// ```
-pub fn icts<G: Graph>(instance: &Instance<G>, mut budget: impl Budget<Stats>) -> MapfResult {
+pub fn icts<G: Graph>(
+    instance: &Instance<G>,
+    objective: Objective,
+    mut budget: impl Budget<Stats>,
+) -> MapfResult {
     let mut search = Search {
         instance,
+        objective,
         distances: distance_tables(instance.graph(), instance.agents()),
         mdds: BTreeMap::new(),
         stats: Stats::default(),
@@ -84,6 +97,8 @@ pub fn icts<G: Graph>(instance: &Instance<G>, mut budget: impl Budget<Stats>) ->
 struct Search<'a, G> {
     /// The instance being solved.
     instance: &'a Instance<G>,
+    /// What the search minimizes; decides the children of a cost vector.
+    objective: Objective,
     /// Distances to each agent's goal, indexed by agent.
     distances: Vec<Vec<Option<u32>>>,
     /// The MDD of each `(agent, cost)` built so far.
@@ -95,7 +110,7 @@ struct Search<'a, G> {
 impl<G: Graph> Search<'_, G> {
     /// Runs the high-level search to its end.
     fn run(&mut self, budget: &mut impl Budget<Stats>) -> Outcome {
-        let Some(root) = self.individual_costs() else {
+        let Some(root) = self.root() else {
             return Outcome::Unsolvable;
         };
 
@@ -112,9 +127,7 @@ impl<G: Graph> Search<'_, G> {
                 return Outcome::Solved(Solution::new(paths));
             }
 
-            for agent in 0..costs.len() {
-                let mut child = costs.clone();
-                child[agent] += 1;
+            for child in self.children(&costs) {
                 if seen.insert(child.clone()) {
                     self.stats.generated += 1;
                     open.insert((child.iter().sum(), child));
@@ -123,6 +136,35 @@ impl<G: Graph> Search<'_, G> {
         }
 
         unreachable!("the cost tree is infinite")
+    }
+
+    /// The children of the cost vector `costs`: one agent's cost raised by 1 for sum of
+    /// costs, every cost raised by 1 for makespan.
+    fn children(&self, costs: &[Time]) -> Vec<Vec<Time>> {
+        match self.objective {
+            Objective::SumOfCosts => (0..costs.len())
+                .map(|agent| {
+                    let mut child = costs.to_vec();
+                    child[agent] += 1;
+                    child
+                })
+                .collect(),
+            Objective::Makespan => Vec::from([costs.iter().map(|cost| cost + 1).collect()]),
+        }
+    }
+
+    /// The first cost vector: every agent's cost alone for sum of costs, their maximum for
+    /// every agent for makespan. `None` if an agent cannot reach its goal.
+    fn root(&self) -> Option<Vec<Time>> {
+        let alone = self.individual_costs()?;
+
+        Some(match self.objective {
+            Objective::SumOfCosts => alone,
+            Objective::Makespan => {
+                let makespan = alone.iter().copied().max().unwrap_or(0);
+                alloc::vec![makespan; alone.len()]
+            }
+        })
     }
 
     /// Every agent's cost alone; `None` if one cannot reach its goal.

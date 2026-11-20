@@ -1,15 +1,18 @@
-//! Enhanced CBS ([`ecbs`], Barer et al. 2014): bounded-suboptimal for sum of costs, with
-//! focal search at both levels.
+//! Enhanced CBS ([`ecbs`], Barer et al. 2014): bounded-suboptimal for sum of costs or
+//! makespan ([`Objective`]), with focal search at both levels.
 //!
 //! - **Low level:** each agent's path costs at most `w` times its cheapest path under its
 //!   constraints, preferring few conflicts with the other agents' current paths. The search
 //!   also reports `f_min`, a lower bound on that cheapest cost.
-//! - **High level:** constraint-tree nodes are ordered by their lower bound, the sum of the
-//!   agents' bounds. The focal sublist is every node whose sum of costs is at most `w`
-//!   times the smallest lower bound, ordered by the number of conflicting agent pairs.
+//! - **High level:** constraint-tree nodes are ordered by their lower bound: the sum of the
+//!   agents' bounds for sum of costs, their maximum for makespan. The focal sublist is
+//!   every node whose objective value is at most `w` times the smallest lower bound,
+//!   ordered by the number of conflicting agent pairs.
 //!
-//! The returned solution therefore costs at most `w` times the optimal sum of costs. With
-//! `w = 1` ECBS is optimal.
+//! Every agent's path costs at most `w` times its bound, so every node's sum of costs is at
+//! most `w` times the sum of the bounds and its makespan at most `w` times their maximum.
+//! The returned solution therefore costs at most `w` times the optimum of the objective.
+//! With `w = 1` ECBS is optimal.
 
 mod low_level;
 
@@ -24,20 +27,16 @@ use crate::focal::FocalList;
 use crate::graph::Graph;
 use crate::instance::{AgentId, Instance};
 use crate::low_level::distance_tables;
-use crate::path::{Path, path_cost, sum_of_costs};
+use crate::path::{Objective, Path, makespan, path_cost, sum_of_costs};
 use crate::solution::{MapfResult, Outcome, Solution};
 
-/// Finds a conflict-free plan whose sum of costs is at most `weight` times the optimum, with
-/// enhanced conflict-based search.
+/// Finds a conflict-free plan whose `objective` value is at most `weight` times the optimum,
+/// with enhanced conflict-based search.
 ///
 /// `budget` is asked before every constraint-tree expansion; [`MapfResult::stats`] counts
 /// expanded nodes in [`Stats::expanded`] and nodes with paths (the root included) in
 /// [`Stats::generated`]. Low-level searches run to completion. Like CBS, ECBS can only
 /// prove unsolvability when an agent has no path at all or the tree runs empty.
-///
-/// Not supported: makespan, and goal-stay conflicts in the low level's conflict count (an
-/// agent that finishes where others pass later is not penalized; the high level still
-/// resolves such conflicts).
 ///
 /// # Panics
 ///
@@ -46,7 +45,7 @@ use crate::solution::{MapfResult, Outcome, Solution};
 /// # Examples
 ///
 /// ```
-/// use mapf_search::{Agent, Grid, Instance, Limits, Weight, ecbs, first_conflict};
+/// use mapf_search::{Agent, Grid, Instance, Limits, Objective, Weight, ecbs, first_conflict};
 ///
 /// let grid = Grid::parse(&["@.@", "...", "@.@"]);
 /// let agents = vec![
@@ -55,7 +54,8 @@ use crate::solution::{MapfResult, Outcome, Solution};
 /// ];
 /// let instance = Instance::new(grid, agents)?;
 ///
-/// let result = ecbs(&instance, Weight::new(3, 2), Limits::expansions(1_000));
+/// let budget = Limits::expansions(1_000);
+/// let result = ecbs(&instance, Objective::SumOfCosts, Weight::new(3, 2), budget);
 /// let solution = result.solution().expect("solvable");
 /// assert_eq!(first_conflict(&solution.paths), None);
 /// assert!(2 * solution.sum_of_costs <= 3 * 5, "the optimum is 5");
@@ -63,6 +63,7 @@ use crate::solution::{MapfResult, Outcome, Solution};
 /// ```
 pub fn ecbs<G: Graph>(
     instance: &Instance<G>,
+    objective: Objective,
     weight: Weight,
     mut budget: impl Budget<Stats>,
 ) -> MapfResult {
@@ -73,6 +74,7 @@ pub fn ecbs<G: Graph>(
 
     let mut search = Search {
         instance,
+        objective,
         weight,
         distances: distance_tables(instance.graph(), instance.agents()),
         open: FocalList::new(weight),
@@ -122,12 +124,14 @@ impl Node {
 struct Search<'a, G> {
     /// The instance being solved.
     instance: &'a Instance<G>,
+    /// What the search bounds.
+    objective: Objective,
     /// The suboptimality factor of both levels.
     weight: Weight,
     /// Distances to each agent's goal, indexed by agent.
     distances: Vec<Vec<Option<u32>>>,
-    /// The open nodes: lower bound as `f`, sum of costs as value; focal key: conflicting
-    /// pairs, then sum of costs.
+    /// The open nodes: lower bound as `f`, objective value as value; focal key:
+    /// conflicting pairs, then the objective value.
     open: FocalList<(usize, u32), Node>,
     /// Counters reported in [`MapfResult::stats`].
     stats: Stats,
@@ -217,8 +221,13 @@ impl<G: Graph> Search<'_, G> {
 
     /// Opens `node`.
     fn push(&mut self, node: Node) {
-        let lower_bound = node.lower_bounds.iter().sum();
-        let cost = sum_of_costs(&node.paths);
+        let (lower_bound, cost) = match self.objective {
+            Objective::SumOfCosts => (node.lower_bounds.iter().sum(), sum_of_costs(&node.paths)),
+            Objective::Makespan => (
+                node.lower_bounds.iter().copied().max().unwrap_or(0),
+                makespan(&node.paths),
+            ),
+        };
         debug_assert!(
             node.paths
                 .iter()

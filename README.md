@@ -6,11 +6,11 @@ Multi-agent pathfinding: CBS, ECBS, CBS-TA, ICTS, PBS, M* and MAPF-LNS2.
 
 - CBS, optimal for sum of costs or makespan, with prioritized (cardinal) conflicts,
   bypass and the CG heuristic, each switchable (`cbs`, `cbs_with`, `CbsConfig`)
-- ECBS, bounded-suboptimal for sum of costs, focal search at both levels (`ecbs`)
+- ECBS, bounded-suboptimal, focal search at both levels (`ecbs`)
 - PBS, priority-based search: fast, neither optimal nor complete (`pbs`)
-- ICTS with pairwise pruning, optimal for sum of costs (`icts`)
-- M* (basic subdimensional expansion), optimal for sum of costs, proves unsolvability
-  (`mstar`)
+- ICTS with pairwise pruning, optimal (`icts`)
+- M* (basic subdimensional expansion), optimal, proves unsolvability (`mstar`)
+- Every solver takes an `Objective`: sum of costs or makespan
 - Shared parts: conflict detection, constraints, space-time A* low level, MDDs, Moving AI
   `.map`/`.scen` parsers
 

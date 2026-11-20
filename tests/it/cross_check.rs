@@ -78,10 +78,14 @@ proptest! {
     fn solvers_agree_on_larger_grids((grid, agents) in instance()) {
         let optimal = [
             Solver::Cbs(CbsConfig::improved(Objective::SumOfCosts)),
-            Solver::Icts,
-            Solver::MStar,
+            Solver::Icts(Objective::SumOfCosts),
+            Solver::MStar(Objective::SumOfCosts),
         ];
-        let others = [Solver::Ecbs(Weight::new(3, 2)), Solver::Ecbs(Weight::ONE), Solver::Pbs];
+        let others = [
+            Solver::Ecbs(Objective::SumOfCosts, Weight::new(3, 2)),
+            Solver::Ecbs(Objective::SumOfCosts, Weight::ONE),
+            Solver::Pbs(Objective::SumOfCosts),
+        ];
         let outcomes: Vec<(Solver, Outcome)> = optimal
             .into_iter()
             .chain(others)

@@ -46,11 +46,11 @@ fn main() {
             cbs_with(&instance, CbsConfig::improved(soc), budget())
         }),
         ("ecbs w=1.5", &|| {
-            ecbs(&instance, Weight::new(3, 2), budget())
+            ecbs(&instance, soc, Weight::new(3, 2), budget())
         }),
-        ("pbs", &|| pbs(&instance, budget())),
-        ("icts", &|| icts(&instance, budget())),
-        ("mstar", &|| mstar(&instance, budget())),
+        ("pbs", &|| pbs(&instance, soc, budget())),
+        ("icts", &|| icts(&instance, soc, budget())),
+        ("mstar", &|| mstar(&instance, soc, budget())),
     ];
 
     // M* takes about 0.3 s per run; ten samples keep the whole run short.

@@ -12,13 +12,13 @@
 //! - [`cbs()`]: conflict-based search, optimal for [`sum_of_costs`] or [`makespan`]
 //!   ([`Objective`]), with prioritized conflicts, bypass and the CG heuristic;
 //!   [`cbs_with`] and [`CbsConfig`] switch them individually.
-//! - [`ecbs`]: enhanced CBS, bounded-suboptimal for sum of costs within a [`Weight`] `w`,
-//!   with focal search at both levels.
-//! - [`icts`]: increasing cost tree search with pairwise pruning, optimal for sum of
-//!   costs.
-//! - [`mstar`]: M* (subdimensional expansion), optimal for sum of costs, and able to prove
-//!   unsolvability.
+//! - [`ecbs`]: enhanced CBS, bounded-suboptimal within a [`Weight`] `w`, with focal search
+//!   at both levels.
+//! - [`icts`]: increasing cost tree search with pairwise pruning, optimal.
+//! - [`mstar`]: M* (subdimensional expansion), optimal, and able to prove unsolvability.
 //! - [`pbs()`]: priority-based search, fast but neither optimal nor complete.
+//!
+//! Every solver takes an [`Objective`]: sum of costs or makespan.
 //! - [`space_time_astar`]: the single-agent low level under [`Constraint`]s, built on the
 //!   `heuristic-search` crate's A*.
 //! - [`first_conflict`] and [`conflicts`]: conflict detection on any set of paths.

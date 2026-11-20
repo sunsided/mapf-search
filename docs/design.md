@@ -48,9 +48,8 @@ engine with pluggable policies.
   is `sum(len_i - 1)`.
 - **Makespan**: `max_i T_i`.
 
-`cbs` takes an `Objective` (`SumOfCosts` or `Makespan`); the other solvers minimize sum
-of costs only. Both objectives use the same low level:
-each agent's path is the cheapest one under its constraints, so a CT node's makespan is
+Every solver takes an `Objective` (`SumOfCosts` or `Makespan`). For CBS, both objectives
+use the same low level: each agent's path is the cheapest one under its constraints, so a CT node's makespan is
 a lower bound on the makespan of every solution below it, just as its SoC is for SoC.
 Ordering the CT by makespan is therefore makespan-optimal. Ties go to the lower SoC, but
 the result is not guaranteed to have the lowest SoC among all makespan-optimal plans:
@@ -59,6 +58,23 @@ that would need a low level that may take longer paths up to the makespan bound.
 Makespan CBS also terminates on solvable instances: a node with makespan at most `M*`
 only has conflicts, and so constraints, at times up to `M*`, and there are finitely many
 such constraint sets. A `Solution` reports both values, `sum_of_costs` and `makespan`.
+
+The other solvers:
+
+- **ECBS** orders nodes by the maximum of the agents' lower bounds instead of their sum,
+  and admits a node to focal by its makespan instead of its sum of costs. Each path costs
+  at most `w` times its agent's bound, so a node's makespan is at most `w` times the
+  largest bound, and the bound guarantee carries over.
+- **PBS** explores the child with the lower objective value first (ties: the other
+  objective). Its low level is unchanged.
+- **ICTS** searches the chain of vectors `(m, ..., m)` from the largest individual optimum
+  on. An MDD of depth `m` contains the paths that arrive earlier and wait, so the first
+  solvable `m` is the optimal makespan.
+- **M\*** prices a joint step at 1 if any agent pays (as the oracle does) and uses the
+  largest unfinished distance as its heuristic. That heuristic is consistent: a step
+  lowers every distance by at most 1 and costs 1 while any agent is unfinished.
+
+None of them minimizes the sum of costs among the makespan-optimal plans.
 
 ## Constraints
 
@@ -196,13 +212,11 @@ are breaking releases of this crate.
 Every solver returns a `MapfResult`: an `Outcome` and high-level `Stats`. `Outcome` is
 `Solved(Solution)`, `Unsolvable` (a proof), `LimitReached` (the budget stopped the run) or
 `Exhausted`. Only PBS returns `Exhausted`: it ran out of options, which proves nothing.
-Solvers that do not support makespan (ECBS, PBS, ICTS, M*) minimize sum of costs and take
-no `Objective`.
 
 ## ECBS (Barer et al. 2014)
 
-`ecbs(instance, weight, budget)` returns a plan whose sum of costs is at most `w` times the
-optimum. `w` is heuristic-search's rational `Weight` (re-exported), compared in integers.
+`ecbs(instance, objective, weight, budget)` returns a plan whose objective value is at
+most `w` times the optimum (see Objectives for makespan). `w` is heuristic-search's rational `Weight` (re-exported), compared in integers.
 
 - **Focal list.** A local `FocalList` (`focal.rs`). Each item has an admissible `f` that
   orders the open list, and a *value* (at least `f`) that decides focal membership: value
@@ -230,7 +244,7 @@ Both crates are changing in parallel, so this crate keeps a small local copy for
 
 ## PBS (Ma et al. 2019)
 
-`pbs(instance, budget)`: depth-first search over partial priority orders. A node stores the
+`pbs(instance, objective, budget)`: depth-first search over partial priority orders. A node stores the
 transitive closure of its order (`higher[a]`, every agent above `a`) and one path per
 agent, the cheapest one that avoids the paths of all agents above it. Those paths become
 constraints: their vertex at each time, the reverse of each move, and `block_from` at their
@@ -246,7 +260,7 @@ agent cannot reach its goal even alone.
 
 ## ICTS (Sharon et al. 2013)
 
-`icts(instance, budget)`: the high level visits cost vectors in order of their sum
+`icts(instance, objective, budget)`: the high level visits cost vectors in order of their sum
 (`BTreeSet` of `(sum, vector)`, deduplicated), starting at every agent's distance to its
 goal. Each child raises one agent's cost by 1. For each vector, the agents' MDDs at their
 costs (without constraints, built once per agent and cost) are searched for a
@@ -263,7 +277,7 @@ infinite tree, so ICTS ends at its budget.
 
 ## M* (Wagner and Choset 2015)
 
-`mstar(instance, budget)`: A* over joint states (every agent's vertex plus a finished
+`mstar(instance, objective, budget)`: A* over joint states (every agent's vertex plus a finished
 flag), with the oracle's goal-stay pricing written independently. An unfinished agent at
 its goal may finish and then stays there for free; every other unfinished agent pays 1 per
 step. The heuristic is the sum of the unfinished agents' distances; it is consistent.
@@ -294,7 +308,6 @@ a few agents are slow (on the benchmark's 8-agent instance it is about 250 times
   assignments in order of cost (Murty's k-best assignments); each CT node also carries
   an assignment. Agents get a set of candidate goals.
 - **Recursive M*** and ODrM*: split collision sets into independent subproblems.
-- **ICTS for makespan**: every agent's cost is the makespan; a simple variant.
 - **MAPF-LNS2** (Li et al. 2022): start from a plan with collisions (prioritized planning
   with soft constraints), repeatedly pick a neighbourhood of agents, replan them with
   SIPPS, keep the result if collisions drop. Needs SIPP (safe-interval path planning) as
@@ -339,8 +352,8 @@ lower bound on 4-connected grids. Moves stay 4-connected, as in the MAPF benchma
   prices SoC with goal-stay exactly, including waits at the goal before leaving. For
   makespan, a joint step costs 1 if any agent pays.
 - **Properties** (proptest, case count fixed in code), for every solver behind one
-  `Solver` enum in the tests: plain and improved CBS for both objectives, each CBS
-  improvement alone, ECBS at `w = 1` and at `w` in {1.1, 1.5, 2, 3}, ICTS, M* and PBS. When
+  `Solver` enum in the tests: plain and improved CBS, each CBS improvement alone, ECBS at
+  `w = 1` and at `w` in {1.1, 1.5, 2, 3}, ICTS, M* and PBS, each for both objectives. When
   the oracle finds an optimum, a solved plan must pass the plan checker and be within the
   solver's guarantee: equal for the optimal solvers, at most `w` times for ECBS, at least
   the optimum for PBS. When the oracle proves the instance unsolvable, no solver returns

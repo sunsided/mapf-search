@@ -51,6 +51,11 @@ fn instance() -> impl Strategy<Value = (Grid, Vec<Agent>)> {
         })
 }
 
+/// Either objective.
+fn objective() -> impl Strategy<Value = Objective> {
+    prop::sample::select(vec![Objective::SumOfCosts, Objective::Makespan])
+}
+
 /// A `width` by `height` grid with the cells marked in `blocked` (row-major) blocked.
 fn grid(width: usize, height: usize, blocked: &[bool]) -> Grid {
     let mut grid = Grid::new(width, height);
@@ -147,36 +152,38 @@ proptest! {
         check(&grid, &agents, Solver::Cbs(config))?;
     }
 
-    /// ICTS agrees with the oracle.
+    /// ICTS agrees with the oracle, for both objectives.
     #[test]
-    fn icts_matches_joint_search((grid, agents) in instance()) {
-        check(&grid, &agents, Solver::Icts)?;
+    fn icts_matches_joint_search((grid, agents) in instance(), objective in objective()) {
+        check(&grid, &agents, Solver::Icts(objective))?;
     }
 
-    /// M* agrees with the oracle.
+    /// M* agrees with the oracle, for both objectives.
     #[test]
-    fn mstar_matches_joint_search((grid, agents) in instance()) {
-        check(&grid, &agents, Solver::MStar)?;
+    fn mstar_matches_joint_search((grid, agents) in instance(), objective in objective()) {
+        check(&grid, &agents, Solver::MStar(objective))?;
     }
 
-    /// PBS plans are valid and no cheaper than the optimum; PBS may give up.
+    /// PBS plans are valid and no cheaper than the optimum, for both objectives; PBS may
+    /// give up.
     #[test]
-    fn pbs_plans_are_valid((grid, agents) in instance()) {
-        check(&grid, &agents, Solver::Pbs)?;
+    fn pbs_plans_are_valid((grid, agents) in instance(), objective in objective()) {
+        check(&grid, &agents, Solver::Pbs(objective))?;
     }
 
-    /// ECBS with `w = 1` is optimal.
+    /// ECBS with `w = 1` is optimal, for both objectives.
     #[test]
-    fn ecbs_with_weight_one_is_optimal((grid, agents) in instance()) {
-        check(&grid, &agents, Solver::Ecbs(Weight::ONE))?;
+    fn ecbs_with_weight_one_is_optimal((grid, agents) in instance(), objective in objective()) {
+        check(&grid, &agents, Solver::Ecbs(objective, Weight::ONE))?;
     }
 
-    /// ECBS stays within its suboptimality factor.
+    /// ECBS stays within its suboptimality factor, for both objectives.
     #[test]
     fn ecbs_stays_within_its_bound(
         (grid, agents) in instance(),
+        objective in objective(),
         numerator in prop::sample::select(vec![11_u32, 15, 20, 30]),
     ) {
-        check(&grid, &agents, Solver::Ecbs(Weight::new(numerator, 10)))?;
+        check(&grid, &agents, Solver::Ecbs(objective, Weight::new(numerator, 10)))?;
     }
 }
