@@ -57,6 +57,7 @@
 //! ## Planned scope
 //!
 //! - Conflict-based: CBS-TA
+//! - `ODrM*`: operator decomposition for recursive M*
 //! - Local repair: MAPF-LNS2
 //! - Partial expansion: EPEA*
 //!
