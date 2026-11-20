@@ -5,7 +5,7 @@
 use heuristic_search::Limits;
 use mapf_search::{
     AdjacencyList, Agent, CbsConfig, Graph, Grid, Instance, MapfResult, Objective, Outcome, Weight,
-    cbs_with, ecbs, pbs,
+    cbs_with, ecbs, icts, pbs,
 };
 
 use crate::oracle::{assert_valid_plan, optimal_cost};
@@ -19,16 +19,19 @@ pub enum Solver {
     Ecbs(Weight),
     /// PBS; no guarantee, incomplete.
     Pbs,
+    /// ICTS; optimal for sum of costs.
+    Icts,
 }
 
 impl Solver {
     /// Every solver in a representative configuration, for sum of costs.
-    pub fn all() -> [Self; 4] {
+    pub fn all() -> [Self; 5] {
         [
             Self::Cbs(CbsConfig::plain(Objective::SumOfCosts)),
             Self::Cbs(CbsConfig::improved(Objective::SumOfCosts)),
             Self::Ecbs(Weight::new(3, 2)),
             Self::Pbs,
+            Self::Icts,
         ]
     }
 
@@ -39,6 +42,7 @@ impl Solver {
             Self::Cbs(config) => cbs_with(instance, config, limits),
             Self::Ecbs(weight) => ecbs(instance, weight, limits),
             Self::Pbs => pbs(instance, limits),
+            Self::Icts => icts(instance, limits),
         }
     }
 
@@ -46,7 +50,7 @@ impl Solver {
     pub fn objective(self) -> Objective {
         match self {
             Self::Cbs(config) => config.objective,
-            Self::Ecbs(_) | Self::Pbs => Objective::SumOfCosts,
+            Self::Ecbs(_) | Self::Pbs | Self::Icts => Objective::SumOfCosts,
         }
     }
 
@@ -54,7 +58,7 @@ impl Solver {
     /// solver guarantees no quality.
     pub fn bound(self) -> Option<(u32, u32)> {
         match self {
-            Self::Cbs(_) => Some((1, 1)),
+            Self::Cbs(_) | Self::Icts => Some((1, 1)),
             Self::Ecbs(weight) => Some((weight.numerator(), weight.denominator())),
             Self::Pbs => None,
         }

@@ -14,6 +14,8 @@
 //!   [`cbs_with`] and [`CbsConfig`] switch them individually.
 //! - [`ecbs`]: enhanced CBS, bounded-suboptimal for sum of costs within a [`Weight`] `w`,
 //!   with focal search at both levels.
+//! - [`icts`]: increasing cost tree search with pairwise pruning, optimal for sum of
+//!   costs.
 //! - [`pbs()`]: priority-based search, fast but neither optimal nor complete.
 //! - [`space_time_astar`]: the single-agent low level under [`Constraint`]s, built on the
 //!   `heuristic-search` crate's A*.
@@ -51,7 +53,6 @@
 //!
 //! - Conflict-based: CBS-TA, and more CBS improvements (DG/WDG heuristics,
 //!   disjoint splitting)
-//! - Cost-vector search: ICTS
 //! - Subdimensional: M*
 //! - Local repair: MAPF-LNS2
 //! - Partial expansion: EPEA*
@@ -75,6 +76,7 @@ mod constraint;
 mod ecbs;
 mod focal;
 mod graph;
+mod icts;
 mod instance;
 mod low_level;
 mod mdd;
@@ -89,6 +91,7 @@ pub use constraint::{Constraint, ConstraintSet};
 pub use ecbs::ecbs;
 pub use graph::{AdjacencyList, Graph, Grid, Vertex};
 pub use heuristic_search::{Budget, Limits, Stats, Weight};
+pub use icts::icts;
 pub use instance::{Agent, AgentId, Instance, InstanceError};
 pub use low_level::space_time_astar;
 pub use movingai::{

@@ -147,6 +147,12 @@ proptest! {
         check(&grid, &agents, Solver::Cbs(config))?;
     }
 
+    /// ICTS agrees with the oracle.
+    #[test]
+    fn icts_matches_joint_search((grid, agents) in instance()) {
+        check(&grid, &agents, Solver::Icts)?;
+    }
+
     /// PBS plans are valid and no cheaper than the optimum; PBS may give up.
     #[test]
     fn pbs_plans_are_valid((grid, agents) in instance()) {

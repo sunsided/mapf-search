@@ -63,7 +63,6 @@ impl Mdd {
     }
 
     /// The time of the last level: the arrival time, so the cost, of every path.
-    #[expect(dead_code, reason = "ICTS uses it")]
     pub(crate) fn depth(&self) -> Time {
         Time::try_from(self.levels.len() - 1).expect("depths fit in u32 time steps")
     }
@@ -88,7 +87,6 @@ impl Mdd {
 
     /// The indices into level `time + 1` of the successors of node `index` of level `time`.
     /// At or past the last level, the goal node waits in place: `[0]`.
-    #[cfg_attr(not(test), expect(dead_code, reason = "ICTS uses it"))]
     pub(crate) fn children(&self, time: Time, index: usize) -> &[usize] {
         let level = usize::try_from(time).unwrap_or(usize::MAX);
 
