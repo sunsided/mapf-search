@@ -26,7 +26,7 @@
 //!
 //! Every solver returns a [`MapfResult`]: an [`Outcome`] (with a [`Solution`] if solved)
 //! and high-level [`Stats`]. [`Budget`], [`Limits`] and [`Stats`] are re-exported from
-//! `heuristic-search`; they bound and count the high-level expansions.
+//! `heuristic-search`; they bound and count the high-level expansions. [`Weight`] is too.
 //!
 //! The crate is `no_std` and needs only `alloc`.
 //!

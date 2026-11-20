@@ -48,7 +48,8 @@ engine with pluggable policies.
   is `sum(len_i - 1)`.
 - **Makespan**: `max_i T_i`.
 
-`cbs` takes an `Objective` (`SumOfCosts` or `Makespan`). Both use the same low level:
+`cbs` takes an `Objective` (`SumOfCosts` or `Makespan`); the other solvers minimize sum
+of costs only. Both objectives use the same low level:
 each agent's path is the cheapest one under its constraints, so a CT node's makespan is
 a lower bound on the makespan of every solution below it, just as its SoC is for SoC.
 Ordering the CT by makespan is therefore makespan-optimal. Ties go to the lower SoC, but
@@ -76,8 +77,14 @@ The set also answers two summary questions the low level needs:
 - `blocked_until(goal)`: the latest time the goal vertex is forbidden; the agent may
   not finish at or before it.
 
-Positive constraints (disjoint splitting, Li et al. 2019) and range constraints are
-later work; the representation keeps room for them as new variants.
+PBS also needs "blocked from `t` on, forever" for a vertex where a higher-priority agent
+stays at its goal. `ConstraintSet::block_from(vertex, t)` stores the earliest such `t` per
+vertex. It counts towards `latest_step()`, so the horizon argument below still holds on the
+graph minus the blocked vertices, and `blocked_until` reports `Time::MAX` for such a vertex:
+an agent can never finish there.
+
+Positive constraints (disjoint splitting, Li et al. 2019) are later work; the
+representation keeps room for them as new variants.
 
 ## CBS (Sharon et al. 2015)
 
@@ -95,10 +102,38 @@ those paths.
    `(i, j, u, v, t)` the children get `Edge(i, u, v, t)` and `Edge(j, v, u, t)`.
 5. In each child, replan only the constrained agent. If it has no path, drop the child.
 
-**Conflict selection.** Milestone 1 picks the earliest conflict (smallest `t`, then the
-smallest agent pair). Any choice keeps optimality. Later: prioritized conflicts via MDDs
-(cardinal > semi-cardinal > non-cardinal, Boyarski et al. 2015), bypassing, and the
-admissible CG/DG/WDG heuristics (Felner et al. 2018; Li et al. 2019).
+**Improvements** (milestone 3). `cbs` uses all of them; `cbs_with` takes a `CbsConfig`
+that switches each one (`CbsConfig::plain` is milestone 1's CBS). None changes the
+objective value of the result.
+
+- **MDDs.** `Mdd` holds every path of one agent that arrives at its goal at exactly a
+  given time under its constraints, layered by time: a forward pass under the constraints
+  and the distance bound, then a backward prune. Every remaining node lies on a full path.
+  Levels past the depth are the goal alone (goal-stay), so a conflict at a finished
+  agent's goal is classified correctly. A node builds MDDs only for its conflicting agents
+  and shares the others with its parent through `Rc`.
+- **Prioritized conflicts** (Boyarski et al. 2015). A conflict is cardinal for an agent if
+  its MDD at its current cost has the conflicting vertex (for a swap: both ends) as the
+  only node at that time. Cardinal for both is cardinal, for one semi-cardinal. CBS splits
+  the earliest conflict of the most cardinal class. Without prioritizing, it picks the
+  earliest conflict (smallest `t`, then the smallest agent pair). Any choice keeps
+  optimality.
+- **Bypass.** If a child is as cheap *for its replanned agent* as the parent and has
+  strictly fewer conflicts, the parent takes over the child's paths (keeping its own
+  constraints and MDDs) and is reopened instead of being split. Comparing the agent's own
+  cost matters for makespan: a node's makespan can stay the same while one path gets
+  dearer, and then the path is no longer the cheapest under the node's constraints. Each
+  bypass counts as an expansion.
+- **CG heuristic** (Felner et al. 2018). The cardinal conflict graph has agents as
+  vertices and an edge per pair with a cardinal conflict. Every vertex cover of it is a set
+  of agents whose costs must rise, so its minimum size is an admissible bound on the
+  sum-of-costs increase. `vertex_cover_bound` starts from a greedy maximal matching (a
+  lower bound) and searches exactly up to size 12, which is exponential in the size. Above
+  that it returns the largest size proven necessary. A greedy *cover* would overestimate
+  and break optimality. Admissible for sum of costs only, so it is off for makespan.
+- On the hard 3x3 instance below, plain CBS needs about 73 000 expansions; with all
+  improvements about 10 000. DG/WDG heuristics (Li et al. 2019) and disjoint splitting
+  would cut this further.
 
 **Duplicate handling.** A child never re-adds a constraint its parent already holds: the
 parent's paths satisfy all of its constraints, and the new constraint is violated by
@@ -148,34 +183,119 @@ conflicts with other agents' paths, Sharon et al. 2015) needs a secondary key; s
 Its API fits without changes: `Successors` with a callback is the time-expanded adapter,
 `Goal` and `Heuristic` are closures, `Cost = u32`, and `Outcome::Unsolvable` with the
 horizon is a proof. The crate depends on it through a path dependency on the sibling
-draft (`../heuristic-search`, branch `draft/initial`, at `60d01f4` when this was last updated).
+draft (`../heuristic-search`, branch `draft/initial`, at `b5cc485` when this was last updated).
 **The path dependency must become a crates.io version before `mapf-search` is published.**
 
 The CBS high level reuses heuristic-search's `Budget`, `Limits` and `Stats` for its own
-CT expansion counts, so callers limit both layers with the same types. These types are
-re-exported, which makes heuristic-search a **public dependency**: its breaking releases
+CT expansion counts, so callers limit both layers with the same types, and ECBS takes its
+`Weight`. These types are re-exported, which makes heuristic-search a **public dependency**: its breaking releases
 are breaking releases of this crate.
+
+## Shared result types
+
+Every solver returns a `MapfResult`: an `Outcome` and high-level `Stats`. `Outcome` is
+`Solved(Solution)`, `Unsolvable` (a proof), `LimitReached` (the budget stopped the run) or
+`Exhausted`. Only PBS returns `Exhausted`: it ran out of options, which proves nothing.
+Solvers that do not support makespan (ECBS, PBS, ICTS, M*) minimize sum of costs and take
+no `Objective`.
+
+## ECBS (Barer et al. 2014)
+
+`ecbs(instance, weight, budget)` returns a plan whose sum of costs is at most `w` times the
+optimum. `w` is heuristic-search's rational `Weight` (re-exported), compared in integers.
+
+- **Focal list.** A local `FocalList` (`focal.rs`). Each item has an admissible `f` that
+  orders the open list, and a *value* (at least `f`) that decides focal membership: value
+  at most `floor(w * f_min)`. The focal sublist is ordered by a free secondary key. Items
+  can be removed by handle, and the sublist is resynchronized lazily when `f_min` moves
+  either way.
+- **Low level.** Focal search over `(vertex, time)`. Here `f` is both order and value, and
+  the focal key is the accumulated number of conflicts with the other agents' current
+  paths (vertex conflicts, swaps, agents parked at their goals), then `f`, then larger `g`.
+  `g` is the time, so it never improves: no state is reopened, and `f_min` stays a valid
+  lower bound. The search reports `f_min` at the pop of the goal as the agent's lower
+  bound. The horizon is the A* low level's. Not counted: future conflicts at the agent's
+  own goal after it finishes (the high level still resolves them).
+- **High level.** A node's `f` is the sum of its agents' lower bounds; its value is its sum
+  of costs; its focal key is the number of conflicting agent pairs, then the sum of costs.
+  A child keeps the larger of its parent's and its own bound for the replanned agent; both
+  are valid under the child's constraints. Every node satisfies `cost <= w * f`, so the
+  node with the smallest `f` is always in focal, and the result costs at most
+  `w * f_min <= w * optimum`. The root plans agents one after another, each avoiding the
+  earlier ones' paths.
+- `w = 1` is optimal; the property tests check this against the oracle.
+
+TODO: switch to heuristic-search's `FocalList` (added in its `b5cc485`) once it settles.
+Both crates are changing in parallel, so this crate keeps a small local copy for now.
+
+## PBS (Ma et al. 2019)
+
+`pbs(instance, budget)`: depth-first search over partial priority orders. A node stores the
+transitive closure of its order (`higher[a]`, every agent above `a`) and one path per
+agent, the cheapest one that avoids the paths of all agents above it. Those paths become
+constraints: their vertex at each time, the reverse of each move, and `block_from` at their
+goal from their arrival on.
+
+The earliest conflict `(a, b)` gives two children, `a` above `b` and `b` above `a`, unless
+the order already says otherwise. A child replans the new lower agent. Then it replans, in
+topological order, every agent below that one whose path conflicts with an agent above
+it. In a transitive closure an agent above another has strictly fewer agents above it, so
+sorting by `|higher|` is a topological order. A failed replan drops the child. The cheaper
+child is explored first. PBS is neither optimal nor complete; `Unsolvable` only means an
+agent cannot reach its goal even alone.
+
+## ICTS (Sharon et al. 2013)
+
+`icts(instance, budget)`: the high level visits cost vectors in order of their sum
+(`BTreeSet` of `(sum, vector)`, deduplicated), starting at every agent's distance to its
+goal. Each child raises one agent's cost by 1. For each vector, the agents' MDDs at their
+costs (without constraints, built once per agent and cost) are searched for a
+conflict-free combination: first every pair alone (simple pairwise pruning), then all
+agents. The joint MDD search is a depth-first search over `(time, MDD node per agent)`
+with a visited set. An agent past its MDD's depth stays at its goal and still blocks the
+others.
+
+An MDD of cost `c` includes paths that reach the goal early and wait. That is fine: such a
+plan is also found at the cheaper vector of its actual costs, which is visited first. So
+the first solved vector gives an optimal plan. Its sum of costs is recomputed from the
+trimmed paths. Unsolvable instances where every agent can reach its goal alone give an
+infinite tree, so ICTS ends at its budget.
+
+## M* (Wagner and Choset 2015)
+
+`mstar(instance, budget)`: A* over joint states (every agent's vertex plus a finished
+flag), with the oracle's goal-stay pricing written independently. An unfinished agent at
+its goal may finish and then stays there for free; every other unfinished agent pays 1 per
+step. The heuristic is the sum of the unfinished agents' distances; it is consistent.
+
+Agents outside a state's collision set follow their individual policy: the
+smallest-numbered neighbour one step closer to their goal, or finish at the goal. Agents
+in it branch over every move to a vertex that can still reach their goal, plus finishing at
+the goal. Generating a successor:
+
+- If the joint step collides (same vertex, or a swap), the colliders are merged into the
+  expanding state's collision set and passed back. The successor is not stored.
+- Otherwise the expanding state is recorded in the successor's back set, the successor's
+  current collision set is passed back to it right away, and the successor's `g` is
+  relaxed.
+
+Passing back merges a set into a state's set. Wherever that set grows, it reopens the state
+and continues through the state's back set (a worklist, not recursion). A popped state is
+skipped if it was already expanded with the same `g` and collision-set size.
+
+The joint space is finite, so M* also proves unsolvability, for example on the corridor
+swap where CBS and ICTS only hit their budget. This is basic M*: one merged collision set
+per state, not recursive M*'s independent subsets, so strongly coupled groups of more than
+a few agents are slow (the benchmark's 8-agent instance takes about 300 times as long as
+the other solvers).
 
 ## Later algorithms
 
-- **ECBS** (Barer et al. 2014): bounded-suboptimal CBS with factor `w`. Both levels use
-  focal search: the low level orders a focal list (`f <= w * f_min`) by number of
-  conflicts with other agents' paths; the high level by number of conflicting agent
-  pairs. Needs a focal open list from heuristic-search, or a local one.
 - **CBS-TA** (Hönig et al. 2018): task assignment plus pathfinding. The root enumerates
   assignments in order of cost (Murty's k-best assignments); each CT node also carries
   an assignment. Agents get a set of candidate goals.
-- **ICTS** (Sharon et al. 2013): high level is a breadth-first search over cost vectors
-  `(c_1, ..., c_k)` starting at individual optima; low level builds an MDD per agent for
-  its cost and searches the cross product of MDDs for a conflict-free joint path,
-  with pairwise pruning. Shares the MDD type with prioritized CBS conflicts.
-- **PBS** (Ma et al. 2019): depth-first search over partial priority orders; on a
-  conflict, branch on which agent has priority and replan the lower agents with the
-  higher agents' paths as moving obstacles. Needs a reservation table (vertex and edge
-  occupancy by time, plus goal-stay "occupied from `t` on").
-- **M*** (Wagner and Choset 2011/2015): A* in the joint space where each agent follows its
-  individual optimal policy until it collides; colliding agents join a collision set and
-  only they branch. Shares the joint-state type with the test oracle.
+- **Recursive M*** and ODrM*: split collision sets into independent subproblems.
+- **ICTS for makespan**: every agent's cost is the makespan; a simple variant.
 - **MAPF-LNS2** (Li et al. 2022): start from a plan with collisions (prioritized planning
   with soft constraints), repeatedly pick a neighbourhood of agents, replan them with
   SIPPS, keep the result if collisions drop. Needs SIPP (safe-interval path planning) as
@@ -219,21 +339,34 @@ lower bound on 4-connected grids. Moves stay 4-connected, as in the MAPF benchma
   forever, pays nothing from then on), every other unfinished agent pays 1 per step. This
   prices SoC with goal-stay exactly, including waits at the goal before leaving. For
   makespan, a joint step costs 1 if any agent pays.
-- **Properties** (proptest, case count fixed in code), once per objective: when the
-  oracle finds an optimum, CBS returns `Solved` with the same objective value and
-  conflict-free paths that start at the starts, end at the goals and use only edges and waits. When the oracle proves the
-  instance unsolvable, CBS does not return `Solved`. About 1 in 600 random solvable
-  instances needs more than the 20 000 CT expansions the property test allows (plain CBS
-  blows up on tightly coupled agents); those cases are discarded, and one of them
-  (73 000 expansions) is kept as an ignored regression test.
+- **Properties** (proptest, case count fixed in code), for every solver behind one
+  `Solver` enum in the tests: plain and improved CBS for both objectives, each CBS
+  improvement alone, ECBS at `w = 1` and at `w` in {1.1, 1.5, 2, 3}, ICTS, M* and PBS. When
+  the oracle finds an optimum, a solved plan must pass the plan checker and be within the
+  solver's guarantee: equal for the optimal solvers, at most `w` times for ECBS, at least
+  the optimum for PBS. When the oracle proves the instance unsolvable, no solver returns
+  `Solved`. A complete solver must not return `Unsolvable` on a solvable instance. About
+  1 in 600 random solvable instances needs more than the 20 000 expansions the property
+  test allows (plain CBS blows up on tightly coupled agents); those cases are discarded, and
+  one of them (73 000 expansions for plain CBS, about 10 000 improved) is kept as a
+  regression test. Each property passed 1 500 cases once in release mode.
+- **Cross-checks** on random 4x4 to 5x5 grids with 3-4 agents, too large for the oracle:
+  improved CBS, ICTS and M* agree on the sum of costs whenever they solve, ECBS and PBS
+  respect their guarantees relative to it, no solver claims `Unsolvable` while another
+  solves, and every plan passes the plan checker (1 500 cases once in release mode).
+- **Hand-made cases for every solver:** an agent that steps off its goal, an agent passing
+  through a finished agent's goal, an unreachable goal (`Unsolvable`), and a corridor swap
+  (never `Solved`; M* proves it `Unsolvable`).
 - **Hand-made cases:** swapping conflict detected, goal-stay respected (another agent's
   path crosses a finished agent's goal), an agent that must step off its goal, unreachable
   goal (`Unsolvable`), corridor swap (`LimitReached` under a budget).
 - **Parsers:** a hand-written 8x8 map with CRLF line ends and six agents, every
   `ParseErrorKind` and `ScenarioError` variant, and CBS (both objectives) on the parsed
   instance, checked by the oracle's plan checker.
+- **Benchmark:** `benches/solvers.rs` times every solver on one fixed 8x8 instance with
+  eight agents, with `std::time::Instant` and no benchmark dependency.
 - **Later:** real Moving AI instances with known optimal SoC from published results, as
-  slow ignored tests (the benchmark files are not vendored); cross-checks between CBS, ICTS and M* once they exist.
+  slow ignored tests (the benchmark files are not vendored).
 
 ## Milestones
 
@@ -241,17 +374,22 @@ lower bound on 4-connected grids. Moves stay 4-connected, as in the MAPF benchma
    detection, constraints, space-time A* via heuristic-search, optimal CBS for SoC, oracle
    and property tests.
 2. **Done in this draft.** Makespan-optimal CBS; Moving AI `.map`/`.scen` parser.
-3. MDDs, prioritized conflicts, CG heuristic, conflict avoidance table (needs the
-   lexicographic cost from heuristic-search), disjoint splitting.
-4. ECBS (focal search), PBS with a reservation table.
-5. ICTS (shares MDDs), M* (shares the joint state).
+3. **Done in this draft:** MDDs, prioritized conflicts, bypass, CG heuristic. Open:
+   conflict avoidance table (needs the lexicographic cost from heuristic-search), DG/WDG,
+   disjoint splitting.
+4. **Done in this draft:** ECBS (local focal list), PBS (with `block_from`).
+5. **Done in this draft:** ICTS (shares MDDs), basic M*.
 6. SIPP and MAPF-LNS2; CBS-TA; EPEA*.
 
 ## Cross-crate needs
 
-None blocks the milestones done so far; heuristic-search's API (as of `60d01f4`) covers
-them. The two API additions below belong in heuristic-search, not here. This crate will
-not implement them locally.
+None blocks the milestones done so far. The two API additions below belong in
+heuristic-search. Focal search is implemented locally for now (see ECBS) because both
+crates change in parallel; the lexicographic cost is not implemented here.
+
+The last drafts were built against heuristic-search's commit `b5cc485`. Its working tree
+was mid-change and did not compile at the time, so the checks ran against an export of
+that commit.
 
 ### Secondary tie-break: a lexicographic cost
 
@@ -331,7 +469,8 @@ pub struct FocalResult<G: Successors> {
 
 `lower_bound` is essential: ECBS's high-level bound is the sum of the agents' `f_min`
 values, not their path costs. `Weight` is the existing rational weight. The ECBS high level
-is local to this crate.
+is local to this crate. heuristic-search's `b5cc485` adds a `FocalList`; switching the
+local one to it is a TODO in `focal.rs`.
 
 ### Other needs
 
