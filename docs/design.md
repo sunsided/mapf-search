@@ -298,16 +298,69 @@ and continues through the state's back set (a worklist, not recursion). A popped
 skipped if it was already expanded with the same `g` and collision-set size.
 
 The joint space is finite, so M* also proves unsolvability, for example on the corridor
-swap where CBS and ICTS only hit their budget. This is basic M*: one merged collision set
-per state, not recursive M*'s independent subsets, so strongly coupled groups of more than
-a few agents are slow (on the benchmark's 8-agent instance it is about 250 times slower than ICTS).
+swap where CBS and ICTS only hit their budget.
+
+### Recursive M* (rM*)
+
+`mstar` runs recursive M*; `mstar_with(instance, MStarConfig, budget)` selects basic M*
+(`MStarConfig::basic`) or rM* (`MStarConfig::recursive`). Both share one planner
+(`mstar/planner.rs`); they differ only in how collision sets merge and what a group does:
+
+- **Collision sets** (`mstar/collision.rs`) are disjoint groups of agents. A collision
+  between `i` and `j` merges `{i, j}` with every group that shares an agent. Several
+  pairs colliding in one step are merged pair by pair, so unrelated pairs stay apart.
+  Basic M* merges everything into one group.
+- **Successors.** Agents outside every group follow their individual policy. A group that
+  holds every agent of the current search branches over all moves. In rM*, a smaller group
+  moves one step along an optimal joint path of *that group alone*, from its current
+  joint state. A separate planner over just the group computes that path, recursively by
+  the same rules. If the group cannot reach its goals from there, the state has no
+  successors.
+- **Subgroup planners** live for the whole run, keyed by the sorted group. A query from a
+  new start state bumps the planner's query counter; `g`, the parent and the expansion
+  record of a node only count for the query that set them. Collision sets and predecessor
+  sets are properties of the joint state, not of the query, so they carry over. Every
+  query records the optimal path it found as forward pointers with the exact cost to go.
+  A later query takes such a state's exact cost as its heuristic, which is admissible, and
+  stops when it pops one: its `f` is exact and lowest on the open list, so no cheaper path
+  exists. The rest of the path follows the pointers. A query that exhausts its space
+  caches `None`.
+- **Stale pops.** A node remembers the `g` and the *version* of its collision set when it
+  was expanded; the version is bumped on every change. The set size is not enough: two
+  groups merging keep the agent count.
+- **Budget.** All planners share one `Stats` and one budget, asked before every
+  expansion in any planner. A query stopped by the budget reports `LimitReached` all the
+  way up; only an exhausted query prunes a state.
+- **Ties.** Within equal `f`, the open list prefers a smaller sum-of-costs estimate (the
+  sum of the agents' step costs so far plus their distances), then larger `g`. For sum of
+  costs this is `f` again. For makespan it steers the search through its plateaus: an agent
+  with slack can wander without raising `f`.
+
+Optimality follows Wagner and Choset: a group's optimal joint path is the group's
+policy, and two groups that never collide combine into an optimal path of their union,
+for sum of costs (a sum) and makespan (a maximum). The oracle properties check both
+forms and both objectives; a cross-check compares rM* with CBS on 5-6 agents, and a
+hand-made case with two separate pairs checks that rM* expands fewer states.
+
+On the benchmark's 8-agent instance (sum of costs 92) basic M* takes about 320 ms and
+rM* about 50 ms (5 000 expansions over all planners, against 550 expansions with
+250 000 generated joint states for basic M*: its full branching over a big group is the
+cost). Makespan is much slower for both forms (rM* takes over a minute on that instance)
+because of the plateaus; it is supported, not fast.
+
+**Not done: ODrM\*** (operator decomposition, Wagner and Choset 2015, section 6). OD
+replaces the full branching of a group by one agent at a time, through intermediate
+states that have their own collision sets and predecessor sets. That doubles the state
+types in the planner and changes how collision sets pass back through intermediate states,
+for a constant-factor gain in the case rM* already confines to the smallest groups. Left
+for later; see the open questions in the report.
 
 ## Later algorithms
 
 - **CBS-TA** (Hönig et al. 2018): task assignment plus pathfinding. The root enumerates
   assignments in order of cost (Murty's k-best assignments); each CT node also carries
   an assignment. Agents get a set of candidate goals.
-- **Recursive M*** and ODrM*: split collision sets into independent subproblems.
+- **ODrM\***: operator decomposition inside recursive M* (see above).
 - **MAPF-LNS2** (Li et al. 2022): start from a plan with collisions (prioritized planning
   with soft constraints), repeatedly pick a neighbourhood of agents, replan them with
   SIPPS, keep the result if collisions drop. Needs SIPP (safe-interval path planning) as
@@ -378,7 +431,7 @@ lower bound on 4-connected grids. Moves stay 4-connected, as in the MAPF benchma
 - **Benchmark:** `benches/solvers.rs` (criterion, as in heuristic-search) runs every
   solver on one fixed 8x8 instance with eight agents. All optimal solvers find sum of
   costs 92. Typical times: CBS 0.3 ms plain and 0.4 ms improved, ECBS 0.4 ms, PBS
-  0.3 ms, ICTS 1.3 ms, M* 320 ms.
+  0.3 ms, ICTS 1.3 ms, basic M* 320 ms, recursive M* 50 ms.
 - **Later:** real Moving AI instances with known optimal SoC from published results, as
   slow ignored tests (the benchmark files are not vendored).
 
@@ -392,7 +445,8 @@ lower bound on 4-connected grids. Moves stay 4-connected, as in the MAPF benchma
    conflict avoidance table (needs the lexicographic cost from heuristic-search), DG/WDG,
    disjoint splitting.
 4. **Done in this draft:** ECBS (local focal list), PBS (with `block_from`).
-5. **Done in this draft:** ICTS (shares MDDs), basic M*.
+5. **Done in this draft:** ICTS (shares MDDs), basic and recursive M*, every solver for
+   both objectives. Open: ODrM*.
 6. SIPP and MAPF-LNS2; CBS-TA; EPEA*.
 
 ## Cross-crate needs

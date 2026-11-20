@@ -3,7 +3,8 @@
 //! conflict-free and within its guarantee over the optimal sum of costs or makespan.
 
 use mapf_search::{
-    Agent, CbsConfig, Grid, Instance, Objective, Outcome, Vertex, Weight, first_conflict,
+    Agent, CbsConfig, Grid, Instance, MStarConfig, Objective, Outcome, Vertex, Weight,
+    first_conflict,
 };
 use proptest::prelude::*;
 
@@ -14,7 +15,7 @@ use crate::solvers::{Solver, assert_within};
 const SOLVABLE_BUDGET: u64 = 20_000;
 
 /// High-level expansions a solver may use on instances the oracle proves unsolvable.
-const UNSOLVABLE_BUDGET: u64 = 300;
+const UNSOLVABLE_BUDGET: u64 = 60;
 
 /// A random grid of 2-3 by 2-3 cells (3 by 4 for two agents), about one cell in six
 /// blocked, with 2-3 agents on distinct free starts and distinct free goals.
@@ -158,10 +159,15 @@ proptest! {
         check(&grid, &agents, Solver::Icts(objective))?;
     }
 
-    /// M* agrees with the oracle, for both objectives.
+    /// Basic and recursive M* agree with the oracle, for both objectives.
     #[test]
-    fn mstar_matches_joint_search((grid, agents) in instance(), objective in objective()) {
-        check(&grid, &agents, Solver::MStar(objective))?;
+    fn mstar_matches_joint_search(
+        (grid, agents) in instance(),
+        objective in objective(),
+        recursive in any::<bool>(),
+    ) {
+        let config = MStarConfig { objective, recursive };
+        check(&grid, &agents, Solver::MStar(config))?;
     }
 
     /// PBS plans are valid and no cheaper than the optimum, for both objectives; PBS may

@@ -1,11 +1,22 @@
 //! M* ([`mstar`], Wagner and Choset 2015): A* in the joint space of all agents with
-//! subdimensional expansion, optimal for sum of costs or makespan ([`Objective`]).
+//! subdimensional expansion, optimal for sum of costs or makespan ([`Objective`]), in its
+//! basic and its recursive form ([`MStarConfig`]).
 //!
 //! Each agent follows its individual optimal policy (a fixed shortest path to its goal)
 //! until it collides. Colliding agents join the *collision set* of the state where the
 //! collision was found, and that set is passed back to every predecessor. Only agents in a
-//! state's collision set branch over all their moves; the others keep following their
-//! policy. So the search stays low-dimensional where agents do not interact.
+//! state's collision set leave their policy; the others keep following it. So the search
+//! stays low-dimensional where agents do not interact.
+//!
+//! - **Basic M\*** keeps one collision set per state, and its agents branch over all their
+//!   moves.
+//! - **Recursive M\* (rM\*)** keeps the collision set as disjoint groups: two collisions
+//!   that share no agent stay apart. A group that holds every agent of the search branches
+//!   over all moves, as in basic M\*. A smaller group moves along its own optimal joint
+//!   path, which a separate M\* search over just that group computes, recursively, and
+//!   caches. Only when a group's path collides with another agent do the two merge. So
+//!   two pairs of interacting agents far apart cost two small searches, not one over all
+//!   four.
 //!
 //! Goal-stay pricing, the same as an exact joint search: a joint state is every agent's
 //! vertex plus a *finished* flag. An unfinished agent at its goal may finish; from then on
@@ -19,40 +30,66 @@
 //! flowchart TD
 //!     pop[pop the state with the lowest f] -->|all agents finished| solved[Solved]
 //!     pop -->|open list empty| unsolvable[Unsolvable]
-//!     pop --> succ[successors: collision set branches, the rest follow their policy]
-//!     succ -->|transition collides| back[add the colliders to the collision set, pass it back to predecessors, reopen them]
+//!     pop --> succ[successors: a group of all agents branches, a smaller group follows its own optimal path, the rest follow their policy]
+//!     succ -.->|rM*: a smaller group's path is not cached| sub[M* over that group alone]
+//!     sub -.-> succ
+//!     succ -->|transition collides| back[merge the colliders into the collision set, pass it back to predecessors, reopen them]
 //!     succ -->|collision-free| relax[record predecessor, pass back its collision set, relax g]
 //!     back --> pop
 //!     relax --> pop
 //! ```
 
-use alloc::collections::{BTreeMap, BTreeSet, BinaryHeap};
-use alloc::vec;
+mod collision;
+mod planner;
+
+use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
-use core::cmp::Reverse;
 
 use heuristic_search::{Budget, Stats};
 
+use self::planner::{Context, JointState, LimitReached, Planner};
 use crate::graph::{Graph, Vertex};
-use crate::instance::{AgentId, Instance};
+use crate::instance::Instance;
 use crate::low_level::distance_tables;
 use crate::path::{Objective, Path};
 use crate::solution::{MapfResult, Outcome, Solution};
 
-/// Finds a conflict-free plan with the optimal `objective` value with M*.
+/// What [`mstar_with`] optimizes and which form of M* it runs.
 ///
-/// The joint space is finite, so M* proves unsolvability by exhausting it
-/// ([`Outcome::Unsolvable`]), also where CBS and ICTS only stop at their budget, such as
-/// two agents swapping the ends of a corridor. `budget` is asked before every expansion;
-/// [`MapfResult::stats`] counts expansions (re-expansions included) in
-/// [`Stats::expanded`], generated joint states in [`Stats::generated`] and expansions after
-/// a collision set grew in [`Stats::reopened`].
+/// Both forms return a plan with the optimal value of the objective; they differ in speed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MStarConfig {
+    /// What the search minimizes.
+    pub objective: Objective,
+    /// Recursive M*: plan disjoint collision groups as separate subproblems. `false` runs
+    /// basic M*, with one collision set per state.
+    pub recursive: bool,
+}
+
+impl MStarConfig {
+    /// Basic M*: one collision set per state.
+    #[must_use]
+    pub const fn basic(objective: Objective) -> Self {
+        Self {
+            objective,
+            recursive: false,
+        }
+    }
+
+    /// Recursive M*; what [`mstar`] uses.
+    #[must_use]
+    pub const fn recursive(objective: Objective) -> Self {
+        Self {
+            objective,
+            recursive: true,
+        }
+    }
+}
+
+/// Finds a conflict-free plan with the optimal `objective` value with recursive M*
+/// ([`MStarConfig::recursive`]).
 ///
-/// This is basic M*: collision sets are merged into one set per state, not recursive M*'s
-/// independent subsets, so tightly coupled groups of more than a few agents are slow.
-///
-/// For [`Objective::Makespan`] the plan's sum of costs is not guaranteed minimal among the
-/// makespan-optimal plans.
+/// See [`mstar_with`] for the budget and what is counted.
 ///
 /// # Examples
 ///
@@ -80,337 +117,104 @@ use crate::solution::{MapfResult, Outcome, Solution};
 pub fn mstar<G: Graph>(
     instance: &Instance<G>,
     objective: Objective,
+    budget: impl Budget<Stats>,
+) -> MapfResult {
+    mstar_with(instance, MStarConfig::recursive(objective), budget)
+}
+
+/// Finds a conflict-free plan with the optimal `config.objective` value with the form of M*
+/// that `config` selects.
+///
+/// The joint space is finite, so M* proves unsolvability by exhausting it
+/// ([`Outcome::Unsolvable`]), also where CBS and ICTS only stop at their budget, such as
+/// two agents swapping the ends of a corridor. `budget` is asked before every expansion, in
+/// the top-level search and in every subgroup search of recursive M*;
+/// [`MapfResult::stats`] counts expansions (re-expansions included) in
+/// [`Stats::expanded`], generated joint states in [`Stats::generated`] and expansions after
+/// a collision set grew in [`Stats::reopened`], all summed over every search.
+///
+/// For [`Objective::Makespan`] the plan's sum of costs is not guaranteed minimal among the
+/// makespan-optimal plans. Makespan searches are much slower than sum-of-costs ones: an
+/// agent with slack may wander without raising `f`, so the plateaus of equal `f` are wide.
+/// Open states are therefore ordered by an estimate of their sum of costs within equal `f`.
+/// On the benchmark's 8-agent instance recursive M* takes about 60 ms for sum of costs and
+/// over a minute for makespan.
+///
+/// # Examples
+///
+/// ```
+/// use mapf_search::{Agent, Grid, Instance, Limits, MStarConfig, Objective, mstar_with};
+///
+/// // Two pairs of agents swap places in two rooms, one sooner than the other.
+/// let grid = Grid::parse(&["...@.....", "@.@@@@@.@"]);
+/// let at = |x, y| grid.vertex(x, y);
+/// let agents = vec![
+///     Agent { start: at(0, 0), goal: at(2, 0) },
+///     Agent { start: at(2, 0), goal: at(0, 0) },
+///     Agent { start: at(4, 0), goal: at(8, 0) },
+///     Agent { start: at(8, 0), goal: at(4, 0) },
+/// ];
+/// let instance = Instance::new(grid, agents)?;
+///
+/// let soc = Objective::SumOfCosts;
+/// let basic = mstar_with(&instance, MStarConfig::basic(soc), Limits::NONE);
+/// let recursive = mstar_with(&instance, MStarConfig::recursive(soc), Limits::NONE);
+/// let cost = |result: &mapf_search::MapfResult| result.solution().map(|s| s.sum_of_costs);
+/// assert_eq!(cost(&basic), Some(18));
+/// assert_eq!(cost(&recursive), Some(18));
+/// assert!(recursive.stats.expanded < basic.stats.expanded);
+/// # Ok::<(), mapf_search::InstanceError>(())
+/// ```
+pub fn mstar_with<G: Graph>(
+    instance: &Instance<G>,
+    config: MStarConfig,
     mut budget: impl Budget<Stats>,
 ) -> MapfResult {
     let distances = distance_tables(instance.graph(), instance.agents());
-    let mut search = Search {
-        objective,
+    let mut cx = Context {
         policy: policies(instance.graph(), &distances),
         instance,
+        objective: config.objective,
+        recursive: config.recursive,
         distances,
-        nodes: Vec::new(),
-        index: BTreeMap::new(),
-        open: BinaryHeap::new(),
+        planners: BTreeMap::new(),
         stats: Stats::default(),
     };
-    let outcome = search.run(&mut budget);
+    let outcome = run(&mut cx, &mut budget);
 
     MapfResult {
         outcome,
-        stats: search.stats,
+        stats: cx.stats,
     }
 }
 
-/// A joint state: every agent's vertex and whether it has finished (stays there for good).
-type JointState = Vec<(Vertex, bool)>;
+/// Runs the top-level search over every agent to its end.
+fn run<G: Graph>(cx: &mut Context<'_, G>, budget: &mut impl Budget<Stats>) -> Outcome {
+    let agents = cx.instance.agents();
+    let start: JointState = agents.iter().map(|a| (a.start, false)).collect();
+    let mut planner = Planner::new((0..agents.len()).collect());
 
-/// One agent's choice for one joint step.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Choice {
-    /// Where the agent is after the step.
-    next: Vertex,
-    /// Whether the agent is finished after the step.
-    finished: bool,
-    /// What the step costs the agent: 1 unless it is finished after it.
-    cost: u32,
-}
-
-/// One joint state the search has generated.
-#[derive(Debug, Clone)]
-struct Node {
-    /// The joint state.
-    state: JointState,
-    /// The cheapest known cost from the start.
-    g: u32,
-    /// The heuristic: the unfinished agents' distances to their goals.
-    h: u32,
-    /// The predecessor on the cheapest known path; `None` for the start.
-    parent: Option<usize>,
-    /// The agents that branch over all moves here.
-    collision: BTreeSet<AgentId>,
-    /// Every node that generated this one, so collision sets can be passed back.
-    back: BTreeSet<usize>,
-    /// The `g` and collision-set size of the last expansion; a pop with the same values
-    /// is a stale duplicate.
-    expanded_at: Option<(u32, usize)>,
-}
-
-/// An open-list entry: smallest `f` first, then larger `g`, then first in.
-type Entry = Reverse<(u32, Reverse<u32>, u64, usize)>;
-
-/// The state of one M* run.
-struct Search<'a, G> {
-    /// The instance being solved.
-    instance: &'a Instance<G>,
-    /// What the search minimizes: how agents' step costs combine, and the heuristic.
-    objective: Objective,
-    /// Distances to each agent's goal, indexed by agent.
-    distances: Vec<Vec<Option<u32>>>,
-    /// `policy[agent][vertex]`: the agent's next vertex on its individual optimal path;
-    /// `None` at its goal and where the goal is unreachable.
-    policy: Vec<Vec<Option<Vertex>>>,
-    /// Every generated node.
-    nodes: Vec<Node>,
-    /// The node of each generated joint state.
-    index: BTreeMap<JointState, usize>,
-    /// The open nodes; may hold stale duplicates.
-    open: BinaryHeap<Entry>,
-    /// Counters reported in [`MapfResult::stats`].
-    stats: Stats,
-}
-
-impl<G: Graph> Search<'_, G> {
-    /// Runs the search to its end.
-    fn run(&mut self, budget: &mut impl Budget<Stats>) -> Outcome {
-        let start: JointState = self
-            .instance
-            .agents()
-            .iter()
-            .map(|a| (a.start, false))
-            .collect();
-        let Some(h) = self.heuristic(&start) else {
-            return Outcome::Unsolvable;
-        };
-
-        let root = self.add_node(start, h);
-        self.nodes[root].g = 0;
-        self.push(root);
-        while let Some(Reverse((_, Reverse(g), _, id))) = self.open.pop() {
-            let node = &self.nodes[id];
-            if g != node.g || node.expanded_at == Some((node.g, node.collision.len())) {
-                continue;
-            }
-
-            if node.state.iter().all(|&(_, finished)| finished) {
-                return Outcome::Solved(Solution::new(self.paths(id)));
-            }
-
-            if budget.exhausted(&self.stats) {
-                return Outcome::LimitReached;
-            }
-
-            self.expand(id);
-        }
-
-        Outcome::Unsolvable
-    }
-
-    /// Generates the successors of node `id` under its collision set.
-    fn expand(&mut self, id: usize) {
-        self.stats.expanded += 1;
-        if self.nodes[id].expanded_at.is_some() {
-            self.stats.reopened += 1;
-        }
-
-        let node = &mut self.nodes[id];
-        node.expanded_at = Some((node.g, node.collision.len()));
-        let node = &self.nodes[id];
-        let options: Vec<Vec<Choice>> = (0..node.state.len())
-            .map(|agent| self.choices(&node.state, agent, node.collision.contains(&agent)))
-            .collect();
-
-        let mut picked = Vec::with_capacity(options.len());
-        let mut steps = Vec::new();
-        cartesian(&options, &mut picked, &mut steps);
-        for step in steps {
-            self.step(id, &step);
-        }
-    }
-
-    /// Handles the joint step `step` out of node `id`: passes collisions back, or records
-    /// `id` as a predecessor of the target and relaxes it.
-    fn step(&mut self, id: usize, step: &[Choice]) {
-        let colliders = colliders(&self.nodes[id].state, step);
-        if !colliders.is_empty() {
-            self.pass_back(id, &colliders);
-            return;
-        }
-
-        let state: JointState = step.iter().map(|c| (c.next, c.finished)).collect();
-        let target = if let Some(&target) = self.index.get(&state) {
-            target
-        } else {
-            let h = self
-                .heuristic(&state)
-                .expect("choices keep the goal reachable");
-            self.add_node(state, h)
-        };
-
-        self.nodes[target].back.insert(id);
-        let inherited = self.nodes[target].collision.clone();
-        self.pass_back(id, &inherited);
-
-        let g = self.nodes[id].g + self.step_cost(step);
-        if g < self.nodes[target].g {
-            self.nodes[target].g = g;
-            self.nodes[target].parent = Some(id);
-            self.push(target);
-        }
-    }
-
-    /// Merges `agents` into the collision set of node `id` and, wherever a set grows,
-    /// reopens that node and passes its set on to the node's predecessors.
-    fn pass_back(&mut self, id: usize, agents: &BTreeSet<AgentId>) {
-        let mut work = vec![(id, agents.clone())];
-        while let Some((id, agents)) = work.pop() {
-            let node = &mut self.nodes[id];
-            if agents.is_subset(&node.collision) {
-                continue;
-            }
-
-            node.collision.extend(agents);
-            let merged = node.collision.clone();
-            work.extend(node.back.iter().map(|&back| (back, merged.clone())));
-            self.push(id);
-        }
-    }
-
-    /// The choices of `agent` in `state`: everything if it is in the collision set
-    /// (`branch`), else its policy move.
-    fn choices(&self, state: &JointState, agent: AgentId, branch: bool) -> Vec<Choice> {
-        let (here, finished) = state[agent];
-        let finish = Choice {
-            next: here,
-            finished: true,
-            cost: 0,
-        };
-        let move_to = |next| Choice {
-            next,
-            finished: false,
-            cost: 1,
-        };
-        let at_goal = here == self.instance.agents()[agent].goal;
-        if finished {
-            return vec![finish];
-        }
-
-        if !branch {
-            if at_goal {
-                return vec![finish];
-            }
-
-            let next = self.policy[agent][here].expect("agents stay where the goal is reachable");
-            return vec![move_to(next)];
-        }
-
-        let mut choices = vec![move_to(here)];
-        self.instance.graph().neighbors(here, |next| {
-            if self.distances[agent][next].is_some() {
-                choices.push(move_to(next));
-            }
-        });
-        if at_goal {
-            choices.push(finish);
-        }
-
-        choices
-    }
-
-    /// The cost of the joint step `step`: the sum of the agents' costs for sum of costs, 1
-    /// if any agent pays for makespan.
-    fn step_cost(&self, step: &[Choice]) -> u32 {
-        let mut costs = step.iter().map(|c| c.cost);
-
-        match self.objective {
-            Objective::SumOfCosts => costs.sum(),
-            Objective::Makespan => u32::from(costs.any(|cost| cost > 0)),
-        }
-    }
-
-    /// The sum (for makespan: the maximum) of the unfinished agents' distances to their
-    /// goals; `None` if one cannot reach its goal.
-    fn heuristic(&self, state: &JointState) -> Option<u32> {
-        let mut distances = state
-            .iter()
-            .zip(&self.distances)
-            .filter(|((_, finished), _)| !finished)
-            .map(|(&(vertex, _), distances)| distances[vertex]);
-
-        match self.objective {
-            Objective::SumOfCosts => distances.sum(),
-            Objective::Makespan => {
-                distances.try_fold(0, |max: u32, distance| Some(max.max(distance?)))
-            }
-        }
-    }
-
-    /// Stores a new node for `state` with heuristic `h`; `g` is infinite until relaxed.
-    fn add_node(&mut self, state: JointState, h: u32) -> usize {
-        let id = self.nodes.len();
-        self.stats.generated += 1;
-        self.index.insert(state.clone(), id);
-        self.nodes.push(Node {
-            state,
-            g: u32::MAX,
-            h,
-            parent: None,
-            collision: BTreeSet::new(),
-            back: BTreeSet::new(),
-            expanded_at: None,
-        });
-
-        id
-    }
-
-    /// Opens node `id` at its current `g`.
-    fn push(&mut self, id: usize) {
-        let node = &self.nodes[id];
-        let key = (node.g + node.h, Reverse(node.g), self.stats.generated, id);
-        self.open.push(Reverse(key));
-    }
-
-    /// The agents' paths along the parent chain to node `id`, trimmed of trailing waits.
-    fn paths(&self, id: usize) -> Vec<Path> {
-        let mut states: Vec<&JointState> =
-            core::iter::successors(Some(id), |&id| self.nodes[id].parent)
-                .map(|id| &self.nodes[id].state)
-                .collect();
-        states.reverse();
-
-        (0..self.instance.agents().len())
-            .map(|agent| {
-                let mut path: Path = states.iter().map(|state| state[agent].0).collect();
-                while path.len() > 1 && path[path.len() - 2] == path[path.len() - 1] {
-                    path.pop();
-                }
-
-                path
-            })
-            .collect()
+    match planner.search(cx, start, budget) {
+        Ok(Some(states)) => Outcome::Solved(Solution::new(paths(&states))),
+        Ok(None) => Outcome::Unsolvable,
+        Err(LimitReached) => Outcome::LimitReached,
     }
 }
 
-/// Every combination of one choice per agent from `options`, appended to `out`.
-fn cartesian(options: &[Vec<Choice>], picked: &mut Vec<Choice>, out: &mut Vec<Vec<Choice>>) {
-    let Some(choices) = options.get(picked.len()) else {
-        out.push(picked.clone());
-        return;
-    };
+/// Each agent's path along the joint `states`, trimmed of trailing waits.
+fn paths(states: &[JointState]) -> Vec<Path> {
+    let agents = states.first().map_or(0, Vec::len);
 
-    for &choice in choices {
-        picked.push(choice);
-        cartesian(options, picked, out);
-        picked.pop();
-    }
-}
-
-/// The agents that collide in the joint step `step` from `state`: two agents at the same
-/// vertex afterwards, or two agents swapping along an edge.
-fn colliders(state: &JointState, step: &[Choice]) -> BTreeSet<AgentId> {
-    let mut agents = BTreeSet::new();
-    for (a, choice_a) in step.iter().enumerate() {
-        for (b, choice_b) in step.iter().enumerate().skip(a + 1) {
-            let (from_a, from_b) = (state[a].0, state[b].0);
-            let same = choice_a.next == choice_b.next;
-            let swap =
-                from_a != choice_a.next && from_a == choice_b.next && from_b == choice_a.next;
-            if same || swap {
-                agents.extend([a, b]);
+    (0..agents)
+        .map(|agent| {
+            let mut path: Path = states.iter().map(|state| state[agent].0).collect();
+            while path.len() > 1 && path[path.len() - 2] == path[path.len() - 1] {
+                path.pop();
             }
-        }
-    }
 
-    agents
+            path
+        })
+        .collect()
 }
 
 /// Each agent's individual optimal policy: from every vertex, the smallest-numbered

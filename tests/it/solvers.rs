@@ -4,8 +4,8 @@
 
 use heuristic_search::Limits;
 use mapf_search::{
-    AdjacencyList, Agent, CbsConfig, Graph, Grid, Instance, MapfResult, Objective, Outcome, Weight,
-    cbs_with, ecbs, icts, mstar, pbs,
+    AdjacencyList, Agent, CbsConfig, Graph, Grid, Instance, MStarConfig, MapfResult, Objective,
+    Outcome, Weight, cbs_with, ecbs, icts, mstar_with, pbs,
 };
 
 use crate::oracle::{assert_valid_plan, optimal_cost};
@@ -21,8 +21,8 @@ pub enum Solver {
     Pbs(Objective),
     /// ICTS; optimal for its objective.
     Icts(Objective),
-    /// M*; optimal for its objective.
-    MStar(Objective),
+    /// M*, basic or recursive; optimal for its objective.
+    MStar(MStarConfig),
 }
 
 impl Solver {
@@ -35,14 +35,15 @@ impl Solver {
     }
 
     /// Every solver in a representative configuration, for `objective`.
-    pub fn all_for(objective: Objective) -> [Self; 6] {
+    pub fn all_for(objective: Objective) -> [Self; 7] {
         [
             Self::Cbs(CbsConfig::plain(objective)),
             Self::Cbs(CbsConfig::improved(objective)),
             Self::Ecbs(objective, Weight::new(3, 2)),
             Self::Pbs(objective),
             Self::Icts(objective),
-            Self::MStar(objective),
+            Self::MStar(MStarConfig::basic(objective)),
+            Self::MStar(MStarConfig::recursive(objective)),
         ]
     }
 
@@ -54,7 +55,7 @@ impl Solver {
             Self::Ecbs(objective, weight) => ecbs(instance, objective, weight, limits),
             Self::Pbs(objective) => pbs(instance, objective, limits),
             Self::Icts(objective) => icts(instance, objective, limits),
-            Self::MStar(objective) => mstar(instance, objective, limits),
+            Self::MStar(config) => mstar_with(instance, config, limits),
         }
     }
 
@@ -62,10 +63,8 @@ impl Solver {
     pub fn objective(self) -> Objective {
         match self {
             Self::Cbs(config) => config.objective,
-            Self::Ecbs(objective, _)
-            | Self::Pbs(objective)
-            | Self::Icts(objective)
-            | Self::MStar(objective) => objective,
+            Self::MStar(config) => config.objective,
+            Self::Ecbs(objective, _) | Self::Pbs(objective) | Self::Icts(objective) => objective,
         }
     }
 

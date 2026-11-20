@@ -15,7 +15,8 @@
 //! - [`ecbs`]: enhanced CBS, bounded-suboptimal within a [`Weight`] `w`, with focal search
 //!   at both levels.
 //! - [`icts`]: increasing cost tree search with pairwise pruning, optimal.
-//! - [`mstar`]: M* (subdimensional expansion), optimal, and able to prove unsolvability.
+//! - [`mstar`]: recursive M* (subdimensional expansion), optimal, and able to prove
+//!   unsolvability; [`mstar_with`] and [`MStarConfig`] select basic M*.
 //! - [`pbs()`]: priority-based search, fast but neither optimal nor complete.
 //!
 //! Every solver takes an [`Objective`]: sum of costs or makespan.
@@ -100,7 +101,7 @@ pub use movingai::{
     ParseError, ParseErrorKind, ScenarioEntry, ScenarioError, parse_map, parse_scenario,
     scenario_instance,
 };
-pub use mstar::mstar;
+pub use mstar::{MStarConfig, mstar, mstar_with};
 pub use path::{Objective, Path, Time, makespan, path_cost, position_at, sum_of_costs};
 pub use pbs::pbs;
 pub use solution::{MapfResult, Outcome, Solution};

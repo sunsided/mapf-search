@@ -4,7 +4,8 @@
 use heuristic_search::Limits;
 use mapf_search::{
     AdjacencyList, Agent, CbsConfig, Conflict, Constraint, ConstraintSet, Grid, Instance,
-    InstanceError, Objective, Outcome, cbs, cbs_with, conflicts, first_conflict, space_time_astar,
+    InstanceError, MStarConfig, Objective, Outcome, cbs, cbs_with, conflicts, first_conflict,
+    mstar_with, space_time_astar,
 };
 
 use crate::oracle::{assert_valid_plan, optimal_cost};
@@ -232,4 +233,52 @@ fn improved_cbs_solves_the_hard_instance() {
 
     assert_eq!(assert_valid_plan(&grid, &agents, &solution.paths).0, 19);
     assert!(result.stats.expanded < 15_000, "{:?}", result.stats);
+}
+
+/// Two pairs of agents swap places in two rooms, the right pair later than the left one.
+/// Recursive M* plans the pairs apart and needs fewer expansions than basic M*, which
+/// branches over all four agents once both pairs collided; both are optimal, for both
+/// objectives, and the oracle agrees.
+#[test]
+fn recursive_mstar_plans_independent_pairs_apart() {
+    let grid = Grid::parse(&["...@.....", "@.@@@@@.@"]);
+    let at = |x, y| grid.vertex(x, y);
+    let agents = vec![
+        Agent {
+            start: at(0, 0),
+            goal: at(2, 0),
+        },
+        Agent {
+            start: at(2, 0),
+            goal: at(0, 0),
+        },
+        Agent {
+            start: at(4, 0),
+            goal: at(8, 0),
+        },
+        Agent {
+            start: at(8, 0),
+            goal: at(4, 0),
+        },
+    ];
+    let instance = Instance::new(grid.clone(), agents.clone()).expect("valid");
+
+    for objective in [Objective::SumOfCosts, Objective::Makespan] {
+        let optimum = optimal_cost(&grid, &agents, objective);
+        let basic = mstar_with(&instance, MStarConfig::basic(objective), Limits::NONE);
+        let recursive = mstar_with(&instance, MStarConfig::recursive(objective), Limits::NONE);
+
+        for result in [&basic, &recursive] {
+            let solution = result.solution().expect("solvable");
+            assert_valid_plan(&grid, &agents, &solution.paths);
+            assert_eq!(Some(solution.cost(objective)), optimum, "{objective:?}");
+        }
+
+        assert!(
+            recursive.stats.expanded < basic.stats.expanded,
+            "{objective:?}: {:?} vs {:?}",
+            recursive.stats,
+            basic.stats
+        );
+    }
 }

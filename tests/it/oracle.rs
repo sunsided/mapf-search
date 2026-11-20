@@ -158,7 +158,7 @@ pub fn optimal_cost<G: Graph>(graph: &G, agents: &[Agent], objective: Objective)
     match dijkstra(&joint, start, &goal, Limits::NONE).outcome {
         Outcome::Found(solution) => Some(solution.cost),
         Outcome::Unsolvable => None,
-        Outcome::LimitReached => unreachable!("the oracle runs without limits"),
+        Outcome::LimitReached | Outcome::Cutoff => unreachable!("the oracle runs without limits"),
     }
 }
 

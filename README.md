@@ -9,7 +9,8 @@ Multi-agent pathfinding: CBS, ECBS, CBS-TA, ICTS, PBS, M* and MAPF-LNS2.
 - ECBS, bounded-suboptimal, focal search at both levels (`ecbs`)
 - PBS, priority-based search: fast, neither optimal nor complete (`pbs`)
 - ICTS with pairwise pruning, optimal (`icts`)
-- M* (basic subdimensional expansion), optimal, proves unsolvability (`mstar`)
+- M*, basic and recursive (rM*), optimal, proves unsolvability (`mstar`, `mstar_with`,
+  `MStarConfig`)
 - Every solver takes an `Objective`: sum of costs or makespan
 - Shared parts: conflict detection, constraints, space-time A* low level, MDDs, Moving AI
   `.map`/`.scen` parsers
@@ -17,7 +18,7 @@ Multi-agent pathfinding: CBS, ECBS, CBS-TA, ICTS, PBS, M* and MAPF-LNS2.
 ## Planned scope
 
 - Conflict-based: CBS-TA; DG/WDG heuristics and disjoint splitting for CBS
-- Recursive M*
+- ODrM* (operator decomposition for recursive M*)
 - Local repair: MAPF-LNS2
 - Partial expansion: EPEA*
 
