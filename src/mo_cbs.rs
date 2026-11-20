@@ -66,8 +66,9 @@ pub enum LowLevel {
 
 /// How [`mo_cbs_with`] orders the high-level search and which low level it uses.
 ///
-/// Every configuration returns the same front; they differ in effort.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+/// Every configuration returns the same front; they differ in effort. The default is
+/// [`MoCbsConfig::tree_by_tree`], what [`mo_cbs`] uses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MoCbsConfig {
     /// Tree-by-tree expansion (MO-CBS-t): generate one root at a time and exhaust its tree
     /// before the next. Plain MO-CBS generates every root up front, which is the product
@@ -94,6 +95,12 @@ impl MoCbsConfig {
             tree_by_tree: true,
             low_level: LowLevel::Auto,
         }
+    }
+}
+
+impl Default for MoCbsConfig {
+    fn default() -> Self {
+        Self::tree_by_tree()
     }
 }
 
@@ -480,9 +487,11 @@ impl<const N: usize> Iterator for Roots<N> {
 
 #[cfg(test)]
 mod tests {
-    //! Unit tests for the root enumeration.
+    //! Unit tests for the root enumeration and the front's Filter and Update.
 
     use super::*;
+    use crate::graph::AdjacencyList;
+    use crate::instance::Agent;
 
     /// Two agents with two and three paths give six roots, each combination once.
     #[test]
@@ -496,5 +505,27 @@ mod tests {
         let costs: Vec<[u32; 1]> = roots.map(|node| node.cost).collect();
 
         assert_eq!(costs, [[11], [21], [31], [12], [22], [32]]);
+    }
+
+    /// Update drops a recorded solution that a later one dominates, and Filter then drops
+    /// nodes the new solution weakly dominates. The random properties rarely reach this:
+    /// in lexicographic pop order a dominating solution is usually found first.
+    #[test]
+    fn record_drops_dominated_solutions() {
+        let graph = AdjacencyList::undirected(2, &[(0, 1)]);
+        let instance = Instance::new(graph, vec![Agent { start: 0, goal: 1 }]).expect("valid");
+        let costs = |_: Vertex, _: Vertex| [1, 1];
+        let mut search = Search::new(&instance, &costs, MoCbsConfig::default());
+        let node = |cost: [u32; 2]| Node::new(Vec::new(), vec![Rc::from(vec![0, 1])], vec![cost]);
+
+        search.record(&node([3, 3]));
+        search.record(&node([1, 5]));
+        search.record(&node([2, 2]));
+
+        let front: Vec<_> = search.front.iter().map(|plan| plan.cost).collect();
+        assert_eq!(front, [[1, 5], [2, 2]]);
+        assert!(search.is_filtered(&[2, 2]));
+        assert!(search.is_filtered(&[3, 4]));
+        assert!(!search.is_filtered(&[1, 4]));
     }
 }

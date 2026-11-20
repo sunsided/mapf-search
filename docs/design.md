@@ -565,7 +565,7 @@ that tree, not a clean `d333a8a`.
 | Update: drop solutions dominated by a new one, then add it | `record` | same |
 | One child per Pareto path of the constrained agent | `expand` | same |
 | Terminate when OPEN is empty; `C` is the front | `ParetoOutcome::Complete` | same |
-| MO-CBS-t: tree-by-tree, roots generated on demand | `MoCbsConfig::tree_by_tree()`, the default of `mo_cbs`; `C` shared across trees | same |
+| MO-CBS-t: tree-by-tree, roots generated on demand | `MoCbsConfig::tree_by_tree()`, the default of `mo_cbs` and of `MoCbsConfig`; `C` shared across trees | same |
 | MO-CBS-n: NAMOA*dr-st low level | `LowLevel::NamoaDr` (and `Auto` for `N != 2`) | same, via multiobjective-search |
 | MO-CBS-b: BOA*-st low level, two objectives | `LowLevel::Auto` with `N == 2` | same, via multiobjective-search |
 | Time horizon `T`, "a large positive integer" | `latest_step + vertex_count`, which loses no Pareto-optimal cost vector | sharper |
@@ -593,8 +593,11 @@ that tree, not a clean `d333a8a`.
   instances: those that hit the 20 000-expansion budget are discarded, at most 8 per
   property. One such instance (3x3, middle row walled except the centre, three agents)
   needs over 200 000 expansions with unit costs, as does plain CBS, while improved CBS
-  needs 1 203. Two mutations were checked to fail the properties: keeping only one
-  Pareto path per replanned agent, and skipping Update.
+  needs 1 203. Keeping only one Pareto path per replanned agent makes the two- and
+  three-objective properties fail with missing front points. Skipping Update does not:
+  in lexicographic pop order a dominating solution is almost always found before the
+  ones it dominates, so the properties never reached that case. A unit test of
+  `record` covers Update and Filter directly and fails without Update.
 - **Hand cases:** a corridor swap with a risky pocket and a long safe loop, where every
   root conflicts and the front `[[8, 16], [9, 9]]` comes from conflict resolution (checked
   by hand); an unreachable goal (`Unsolvable`); a bare corridor swap (`LimitReached`).
