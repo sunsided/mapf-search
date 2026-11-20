@@ -9,7 +9,7 @@
 //! keeps blocking it. Two agents [`Conflict`] if they share a vertex at the same time or
 //! swap vertices along an edge.
 //!
-//! - [`cbs`]: conflict-based search, optimal for [`sum_of_costs`].
+//! - [`cbs()`]: conflict-based search, optimal for [`sum_of_costs`].
 //! - [`space_time_astar`]: the single-agent low level under [`Constraint`]s, built on the
 //!   `heuristic-search` crate's A*.
 //! - [`first_conflict`] and [`conflicts`]: conflict detection on any set of paths.

@@ -13,7 +13,8 @@ Multi-agent pathfinding: CBS, ECBS, CBS-TA, ICTS, PBS, M* and MAPF-LNS2.
 
 ## Status
 
-Pre-release. Version 0.0.0 reserves the name; the API is not started yet and will change.
+Pre-release. Milestone 1 (instance types, conflict detection, space-time A*, optimal CBS
+for sum of costs) is drafted; the API will change. See [docs/design.md](docs/design.md).
 
 ## License
 

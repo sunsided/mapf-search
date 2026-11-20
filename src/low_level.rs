@@ -23,7 +23,7 @@ type State = (Vertex, Time);
 /// goal for good (goal-stay: no later constraint forbids the goal).
 ///
 /// Every step, move or wait, costs 1. Returns `None` if no such path exists. Computes a
-/// distance table to the goal on every call; [`cbs`](crate::cbs) computes it once per agent.
+/// distance table to the goal on every call; [`cbs`](crate::cbs()) computes it once per agent.
 ///
 /// # Panics
 ///

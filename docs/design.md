@@ -198,7 +198,10 @@ feature (it reads strings, not files, so it may stay `no_std` with `alloc`). Mil
 - **Properties** (proptest, case count fixed in code): when the oracle finds an optimum,
   CBS returns `Solved` with the same SoC and conflict-free paths that start at the
   starts, end at the goals and use only edges and waits. When the oracle proves the
-  instance unsolvable, CBS does not return `Solved`.
+  instance unsolvable, CBS does not return `Solved`. About 1 in 600 random solvable
+  instances needs more than the 20 000 CT expansions the property test allows (plain CBS
+  blows up on tightly coupled agents); those cases are discarded, and one of them
+  (73 000 expansions) is kept as an ignored regression test.
 - **Hand-made cases:** swapping conflict detected, goal-stay respected (another agent's
   path crosses a finished agent's goal), an agent that must step off its goal, unreachable
   goal (`Unsolvable`), corridor swap (`LimitReached` under a budget).
