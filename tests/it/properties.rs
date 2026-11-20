@@ -129,7 +129,18 @@ proptest! {
         check(&grid, &agents, Solver::Cbs(CbsConfig::improved(Objective::SumOfCosts)))?;
     }
 
-    /// Improved CBS for makespan (the CG heuristic is off there) agrees with the oracle.
+    /// Improved CBS with WDG instead of DG agrees with the oracle: WDG with disjoint
+    /// splitting, bypass and inherited MDDs.
+    #[test]
+    fn improved_cbs_with_wdg_matches_joint_search((grid, agents) in instance()) {
+        let config = CbsConfig {
+            heuristic: CbsHeuristic::Wdg,
+            ..CbsConfig::improved(Objective::SumOfCosts)
+        };
+        check(&grid, &agents, Solver::Cbs(config))?;
+    }
+
+    /// Improved CBS for makespan (the heuristic is off there) agrees with the oracle.
     #[test]
     fn improved_cbs_matches_joint_search_for_makespan((grid, agents) in instance()) {
         check(&grid, &agents, Solver::Cbs(CbsConfig::improved(Objective::Makespan)))?;
@@ -140,7 +151,7 @@ proptest! {
     #[test]
     fn each_cbs_improvement_alone_matches_joint_search(
         (grid, agents) in instance(),
-        improvement in 0..8_usize,
+        improvement in 0..9_usize,
         makespan in any::<bool>(),
     ) {
         let objective = if makespan { Objective::Makespan } else { Objective::SumOfCosts };
@@ -153,6 +164,11 @@ proptest! {
             4 => config.splitting = Splitting::Disjoint,
             5 => config.heuristic = CbsHeuristic::Dg,
             6 => config.heuristic = CbsHeuristic::Wdg,
+            7 => {
+                // WDG over positive constraints and the MDDs a positive child keeps.
+                config.heuristic = CbsHeuristic::Wdg;
+                config.splitting = Splitting::Disjoint;
+            }
             _ => {
                 // Bypass adopts the several paths a positive child replans.
                 config.bypass = true;

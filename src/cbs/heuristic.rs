@@ -253,7 +253,10 @@ mod tests {
 
         /// At every examined node, `cost + h` is at most the optimum below it, CG <= DG <=
         /// WDG, and WDG proves a node dead only if CBS finds nothing below it. With
-        /// standard and with disjoint splitting (positive constraints, stale MDDs).
+        /// standard and with disjoint splitting (positive constraints). Each value is
+        /// computed from MDDs built fresh for the node and an empty pair-weight cache;
+        /// inherited MDDs and cached weights are covered by the oracle properties of the
+        /// integration tests.
         #[test]
         fn heuristics_are_admissible(instance in instance(), disjoint in any::<bool>()) {
             let splitting = if disjoint { Splitting::Disjoint } else { Splitting::Standard };

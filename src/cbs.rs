@@ -74,6 +74,30 @@ pub struct CbsConfig {
     /// The conflict avoidance table (Sharon et al. 2015): among an agent's cheapest paths,
     /// the low level returns one with the fewest conflicts with the other agents' current
     /// paths. The root plans the agents one after another, each avoiding the earlier ones.
+    ///
+    /// ```
+    /// use mapf_search::{Agent, CbsConfig, Grid, Instance, Limits, Objective, cbs_with};
+    ///
+    /// // Four agents cross a free 4x4 grid; ties among cheapest paths decide how often
+    /// // they meet.
+    /// let grid = Grid::new(4, 4);
+    /// let agents = vec![
+    ///     Agent { start: 0, goal: 15 },
+    ///     Agent { start: 3, goal: 12 },
+    ///     Agent { start: 12, goal: 3 },
+    ///     Agent { start: 15, goal: 0 },
+    /// ];
+    /// let instance = Instance::new(grid, agents)?;
+    /// let plain = CbsConfig::plain(Objective::SumOfCosts);
+    /// let avoiding = CbsConfig { conflict_avoidance: true, ..plain };
+    ///
+    /// let without = cbs_with(&instance, plain, Limits::NONE);
+    /// let with = cbs_with(&instance, avoiding, Limits::NONE);
+    /// let cost = |result: &mapf_search::MapfResult| result.solution().map(|s| s.sum_of_costs);
+    /// assert_eq!(cost(&with), cost(&without));
+    /// assert!(with.stats.expanded <= without.stats.expanded);
+    /// # Ok::<(), mapf_search::InstanceError>(())
+    /// ```
     pub conflict_avoidance: bool,
 }
 
@@ -126,6 +150,30 @@ impl CbsConfig {
 /// How CBS splits a conflict between agents `a` and `b` ([`CbsConfig::splitting`]).
 ///
 /// Both keep every solution in exactly one child or in both, so both are optimal.
+///
+/// # Examples
+///
+/// ```
+/// use mapf_search::{Agent, CbsConfig, Grid, Instance, Limits, Objective, Splitting, cbs_with};
+///
+/// let grid = Grid::parse(&["@.@", "...", ".@."]);
+/// let agents = vec![
+///     Agent { start: 1, goal: 3 },
+///     Agent { start: 6, goal: 5 },
+///     Agent { start: 4, goal: 1 },
+/// ];
+/// let instance = Instance::new(grid, agents)?;
+/// let run = |splitting| {
+///     let config = CbsConfig { splitting, ..CbsConfig::improved(Objective::SumOfCosts) };
+///     cbs_with(&instance, config, Limits::expansions(100_000))
+/// };
+///
+/// let (standard, disjoint) = (run(Splitting::Standard), run(Splitting::Disjoint));
+/// assert_eq!(standard.solution().map(|s| s.sum_of_costs), Some(19));
+/// assert_eq!(disjoint.solution().map(|s| s.sum_of_costs), Some(19));
+/// assert!(disjoint.stats.expanded < standard.stats.expanded);
+/// # Ok::<(), mapf_search::InstanceError>(())
+/// ```
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum Splitting {
     /// One child forbids the conflict to `a`, the other to `b` (Sharon et al. 2015). A
@@ -145,7 +193,32 @@ pub enum Splitting {
 /// An admissible estimate of how much the sum of costs of a constraint-tree node must still
 /// rise ([`CbsConfig::heuristic`]).
 ///
-/// Each one needs the MDDs of the node's conflicting agents.
+/// Each one needs the MDDs of the node's conflicting agents. A stronger heuristic means
+/// fewer expansions; WDG pays for that with a small search per dependent pair.
+///
+/// # Examples
+///
+/// ```
+/// use mapf_search::{Agent, CbsConfig, CbsHeuristic, Grid, Instance, Limits, Objective, cbs_with};
+///
+/// let grid = Grid::parse(&["@.@", "...", ".@."]);
+/// let agents = vec![
+///     Agent { start: 1, goal: 3 },
+///     Agent { start: 6, goal: 5 },
+///     Agent { start: 4, goal: 1 },
+/// ];
+/// let instance = Instance::new(grid, agents)?;
+/// let run = |heuristic| {
+///     let config = CbsConfig { heuristic, ..CbsConfig::improved(Objective::SumOfCosts) };
+///     cbs_with(&instance, config, Limits::expansions(100_000))
+/// };
+///
+/// let (cg, wdg) = (run(CbsHeuristic::Cg), run(CbsHeuristic::Wdg));
+/// assert_eq!(cg.solution().map(|s| s.sum_of_costs), Some(19));
+/// assert_eq!(wdg.solution().map(|s| s.sum_of_costs), Some(19));
+/// assert!(wdg.stats.expanded < cg.stats.expanded);
+/// # Ok::<(), mapf_search::InstanceError>(())
+/// ```
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum CbsHeuristic {
     /// No heuristic: nodes are ordered by their sum of costs.
