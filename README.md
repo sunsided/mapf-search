@@ -1,6 +1,6 @@
 # mapf-search
 
-Multi-agent pathfinding: CBS, ECBS, CBS-TA, ICTS, PBS, M* and MAPF-LNS2.
+Multi-agent pathfinding: CBS, ECBS, CBS-TA, ICTS, PBS, M*, MO-CBS and MAPF-LNS2.
 
 ## Implemented
 
@@ -13,7 +13,11 @@ Multi-agent pathfinding: CBS, ECBS, CBS-TA, ICTS, PBS, M* and MAPF-LNS2.
 - ICTS with pairwise pruning, optimal (`icts`)
 - M*, basic and recursive (rM*), each with or without operator decomposition (OD-M*,
   ODrM*), optimal, proves unsolvability (`mstar`, `mstar_with`, `MStarConfig`)
-- Every solver takes an `Objective`: sum of costs or makespan
+- MO-CBS, multi-objective CBS: every Pareto-optimal plan when moves and waits cost
+  vectors, plain or tree-by-tree (MO-CBS-t), over BOA* or NAMOA*dr from
+  `multiobjective-search` (`mo_cbs`, `mo_cbs_with`, `MoCbsConfig`; optional feature
+  `multi-objective`)
+- Every single-objective solver takes an `Objective`: sum of costs or makespan
 - Shared parts: conflict detection, constraints, space-time A* low level, MDDs, Moving AI
   `.map`/`.scen` parsers
 
@@ -25,7 +29,7 @@ Multi-agent pathfinding: CBS, ECBS, CBS-TA, ICTS, PBS, M* and MAPF-LNS2.
 
 ## Status
 
-Pre-release. Milestones 1 to 5 are drafted; the API will change. See
+Pre-release. Milestones 1 to 6 are drafted; the API will change. See
 [docs/design.md](docs/design.md).
 
 ## Breaking changes in this draft

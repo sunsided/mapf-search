@@ -495,6 +495,115 @@ one sum-of-costs search: rM* 30 ms instead of 83 s, basic M* 330 ms, OD-M* 25 ms
 deadline search that fails must exhaust its time-expanded space, so instances whose
 optimal makespan is far above `L` cost more.
 
+## MO-CBS (Ren, Rathinam and Choset 2021)
+
+Multi-objective MAPF: every move and wait costs a vector of `N` objectives, and the
+answer is the Pareto-optimal front, one plan per Pareto-optimal cost vector.
+`mo_cbs(instance, costs, budget)` and `mo_cbs_with(.., MoCbsConfig, ..)` implement
+"A Conflict-Based Search Framework for Multi-Objective Multi-Agent Path Finding"
+(arXiv:2101.03805v5), behind the optional `multi-objective` feature (`src/mo_cbs.rs`,
+`src/mo_cbs/low_level.rs`).
+
+- **Costs.** A closure `costs(from, to) -> [u32; N]`; `costs(v, v)` is the wait at `v`
+  (the paper's self-loops). `N` is a const generic, so cost vectors are plain arrays.
+- **High level.** Alg. 1 as written: the roots are the product of the agents' Pareto
+  sets; nodes are popped in lexicographic cost order (a `BTreeMap` keyed by cost and
+  creation order); Filter drops a node that a found solution weakly dominates, at pop and
+  at insert; a conflict-free node runs Update (drop the solutions it dominates) and joins
+  `C`; the search ends when the open list is empty. Conflicts, constraints
+  (`Constraint::resolving`, standard splitting) and conflict detection
+  (`first_conflict`) are the crate's.
+- **Result.** `ParetoResult { outcome, front, stats }`: `Complete` (the front is exact),
+  `Unsolvable` (an agent has no path alone, or the search ended without a solution) or
+  `LimitReached` (the plans found so far: conflict-free and mutually non-dominated, but
+  not proven Pareto-optimal, since a later tree may dominate them).
+- **Goal-stay.** An agent pays until its final arrival and nothing afterwards, as
+  everywhere in the crate. With one objective and unit costs the front is CBS's optimal
+  sum of costs.
+
+### Decision: the low level from multiobjective-search
+
+The low level must return all cost-unique Pareto-optimal paths of one agent under its
+constraints. multiobjective-search (sibling draft, path dependency, `main` at `d333a8a`)
+already has NAMOA*dr and BOA*, and its interfaces fit a space-time graph without
+changes: `Graph` with `State = (Vertex, Time)` and `Weight = [u32; N]` is the
+time-expanded adapter, the heuristic is a `search_core::Heuristic` closure, and goal
+labels are recorded, not expanded, which is what goal-stay needs. Writing a local
+NAMOA*-st would have duplicated a tested frontier implementation. The cost: the
+dependency is optional so the default build keeps one dependency, and with the feature
+on the MSRV is multiobjective-search's 1.86 instead of 1.85.
+
+- **Graph.** `SpaceTime` in `mo_cbs/low_level.rs`: successors are the wait and every
+  edge, priced by `costs`, minus what `ConstraintSet::allows` forbids; the goal test is
+  `vertex == goal && time >= blocked_until(goal) + 1`.
+- **Horizon.** Successors are cut at `latest_step + vertex_count`, as in the
+  single-objective low level. After the last constrained step the graph is fixed, and
+  removing a cycle or a wait changes a path's cost by a non-negative vector, so every
+  Pareto-optimal cost vector is reached by a path whose unconstrained tail is simple.
+- **Heuristic.** Per objective, the exact cost to the goal on the static graph: one
+  backward Dijkstra per objective and agent, computed once per run. It ignores waits and
+  time, so it is consistent, as NAMOA*dr and BOA* require.
+- **BOA\* adapter.** BOA* is typed for `[C; 2]`; for `N == 2` a small wrapper re-types
+  the weights (`LowLevel::Auto`). `LowLevel::NamoaDr` forces NAMOA*dr for any `N`.
+- **No budget inside.** Neither search takes a budget, so one low-level call runs to
+  completion, like the single-objective low level with `Limits::NONE`.
+
+The sibling's working tree had uncommitted changes (a new `mvh` module) while this was
+written; they compiled and do not touch NAMOA*dr or BOA*, but the checks ran against
+that tree, not a clean `d333a8a`.
+
+### Paper comparison
+
+| Paper (arXiv:2101.03805v5) | Here | Status |
+| --- | --- | --- |
+| Problem: vector edge costs in `(0, inf)^M`, waits are self-loops with costs | `costs(from, to) -> [u32; N]`, `costs(v, v)` for waits; positive components documented as a requirement for termination, not checked | same |
+| Goal behaviour: not specified | goal-stay: pay until final arrival, free afterwards; the goal state needs `t > blocked_until(goal)` | our choice |
+| Vertex and edge (swap) conflicts, first conflict split into two constraints | `first_conflict`, `Constraint::resolving` | same |
+| Initialization: product of all agents' Pareto sets as roots (MO-CBS) | `Roots`, generated up front for `MoCbsConfig::plain()`; budget asked before each root | same |
+| Pop a non-dominated node, in practice lexicographic order | lexicographic, ties by creation order | same |
+| Filter: drop a node weakly dominated by `C` (at pop and before insert) | `is_filtered` at pop and in `push` | same |
+| Update: drop solutions dominated by a new one, then add it | `record` | same |
+| One child per Pareto path of the constrained agent | `expand` | same |
+| Terminate when OPEN is empty; `C` is the front | `ParetoOutcome::Complete` | same |
+| MO-CBS-t: tree-by-tree, roots generated on demand | `MoCbsConfig::tree_by_tree()`, the default of `mo_cbs`; `C` shared across trees | same |
+| MO-CBS-n: NAMOA*dr-st low level | `LowLevel::NamoaDr` (and `Auto` for `N != 2`) | same, via multiobjective-search |
+| MO-CBS-b: BOA*-st low level, two objectives | `LowLevel::Auto` with `N == 2` | same, via multiobjective-search |
+| Time horizon `T`, "a large positive integer" | `latest_step + vertex_count`, which loses no Pareto-optimal cost vector | sharper |
+| Heuristic: `M` backward Dijkstra searches per agent | the same | same |
+| Feasibility pre-check for infeasible instances (unit-cost MAPF, Kornhauser et al.) | not done: `Unsolvable` only when an agent has no path alone or the forest is exhausted; otherwise the budget ends the run (`LimitReached`), as for CBS | missing |
+| Runtime limit | `impl Budget<Stats>`, asked before each expansion | equivalent |
+| A cost-unification variant ("MO-CBS-c") | not in 2101.03805v5, which defines only MO-CBS, -t, -n and -b | not applicable |
+
+### Tests and measurements
+
+- **Pareto oracle** (`tests/it/pareto_oracle.rs`): a label-setting search (Martins 1984)
+  over the joint state of the testing oracle (`tests/it/oracle.rs`), with vector step costs, written
+  without this crate's code and without multiobjective-search. It returns the exact
+  front without a horizon: the joint space is finite and every antichain of integer
+  vectors is finite. This replaces the brief's "enumerate joint plans up to a horizon",
+  which would need a horizon argument of its own.
+- **Properties** (`tests/it/mo_cbs.rs`, 48 cases each): random tiny grids with 2-3 agents
+  and random cost tables (components 1 to 3, per directed move and per wait): two
+  objectives over all four variants, three objectives (plain and `-t`), one weighted
+  objective, and unit costs against the joint oracle's and CBS's optimal sum of costs.
+  On a solvable instance the run must be `Complete`, its cost vectors equal to the
+  oracle's, and every plan must pass the oracle's plan checker and `first_conflict`, with
+  its cost recomputed from the paths. MO-CBS splits like plain CBS (standard splitting,
+  no bypass, no heuristic), so it shares plain CBS's blow-ups on a few tightly coupled
+  instances: those that hit the 20 000-expansion budget are discarded, at most 8 per
+  property. One such instance (3x3, middle row walled except the centre, three agents)
+  needs over 200 000 expansions with unit costs, as does plain CBS, while improved CBS
+  needs 1 203. Two mutations were checked to fail the properties: keeping only one
+  Pareto path per replanned agent, and skipping Update.
+- **Hand cases:** a corridor swap with a risky pocket and a long safe loop, where every
+  root conflicts and the front `[[8, 16], [9, 9]]` comes from conflict resolution (checked
+  by hand); an unreachable goal (`Unsolvable`); a bare corridor swap (`LimitReached`).
+- **Benchmark** (`benches/mo_cbs.rs`, `--features multi-objective`): three agents on a
+  6x6 grid with walls, two objectives with hashed edge costs in `1..=4` as in the paper's
+  experiments. Front of 2, 2 110 expansions for every variant; about 175 ms for MO-CBS-b
+  and -tb, 285 ms for -n and -tn (bench profile, shared machine), so BOA*-st
+  is about 1.6 times faster than NAMOA*dr-st here, in line with the paper's Table I.
+
 ## Later algorithms
 
 - **CBS-TA** (Hönig et al. 2018): task assignment plus pathfinding. The root enumerates
@@ -603,7 +712,9 @@ lower bound on 4-connected grids. Moves stay 4-connected, as in the MAPF benchma
 4. **Done in this draft:** ECBS (local focal list), PBS (with `block_from`).
 5. **Done in this draft:** ICTS (shares MDDs), basic and recursive M*, every solver for
    both objectives, operator decomposition (OD-M*, ODrM*).
-6. SIPP and MAPF-LNS2; CBS-TA; EPEA*.
+6. **Done in this draft:** MO-CBS with its -t, -n and -b variants (feature
+   `multi-objective`).
+7. SIPP and MAPF-LNS2; CBS-TA; EPEA*.
 
 ## Cross-crate needs
 
@@ -738,5 +849,8 @@ level cannot yet (see ECBS).
   environments. ICRA 2011.
 - R. Stern et al. Multi-agent pathfinding: definitions, variants, and benchmarks. SoCS
   2019. (Moving AI MAPF benchmarks)
+- Z. Ren, S. Rathinam, H. Choset. A conflict-based search framework for multi-objective
+  multi-agent path finding. arXiv:2101.03805v5, 2022. (MO-CBS)
+- E. Martins. On a multicriteria shortest path problem. EJOR 16, 1984.
 - D. Kornhauser, G. Miller, P. Spirakis. Coordinating pebble motion on graphs, the
   diameter of permutation groups, and applications. FOCS 1984.
