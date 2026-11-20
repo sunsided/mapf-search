@@ -3,6 +3,7 @@
 
 use alloc::collections::BTreeSet;
 
+use crate::conflict::Conflict;
 use crate::graph::Vertex;
 use crate::instance::AgentId;
 use crate::path::Time;
@@ -33,6 +34,40 @@ pub enum Constraint {
 }
 
 impl Constraint {
+    /// The two constraints that resolve `conflict`, one per agent.
+    pub(crate) fn resolving(conflict: Conflict) -> [Self; 2] {
+        match conflict {
+            Conflict::Vertex {
+                agents: (a, b),
+                vertex,
+                time,
+            } => [a, b].map(|agent| Self::Vertex {
+                agent,
+                vertex,
+                time,
+            }),
+            Conflict::Edge {
+                agents: (a, b),
+                from,
+                to,
+                time,
+            } => [
+                Self::Edge {
+                    agent: a,
+                    from,
+                    to,
+                    time,
+                },
+                Self::Edge {
+                    agent: b,
+                    from: to,
+                    to: from,
+                    time,
+                },
+            ],
+        }
+    }
+
     /// The constrained agent.
     #[must_use]
     pub fn agent(&self) -> AgentId {

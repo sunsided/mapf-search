@@ -5,3 +5,4 @@ mod cases;
 mod movingai;
 mod oracle;
 mod properties;
+mod solvers;

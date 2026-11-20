@@ -12,6 +12,8 @@
 //! - [`cbs()`]: conflict-based search, optimal for [`sum_of_costs`] or [`makespan`]
 //!   ([`Objective`]), with prioritized conflicts, bypass and the CG heuristic;
 //!   [`cbs_with`] and [`CbsConfig`] switch them individually.
+//! - [`ecbs`]: enhanced CBS, bounded-suboptimal for sum of costs within a [`Weight`] `w`,
+//!   with focal search at both levels.
 //! - [`space_time_astar`]: the single-agent low level under [`Constraint`]s, built on the
 //!   `heuristic-search` crate's A*.
 //! - [`first_conflict`] and [`conflicts`]: conflict detection on any set of paths.
@@ -46,7 +48,7 @@
 //!
 //! ## Planned scope
 //!
-//! - Conflict-based: ECBS, CBS-TA, and more CBS improvements (DG/WDG heuristics,
+//! - Conflict-based: CBS-TA, and more CBS improvements (DG/WDG heuristics,
 //!   disjoint splitting)
 //! - Cost-vector search: ICTS
 //! - Priority-based: PBS
@@ -70,6 +72,8 @@ extern crate alloc;
 mod cbs;
 mod conflict;
 mod constraint;
+mod ecbs;
+mod focal;
 mod graph;
 mod instance;
 mod low_level;
@@ -81,8 +85,9 @@ mod solution;
 pub use cbs::{CbsConfig, cbs, cbs_with};
 pub use conflict::{Conflict, conflicts, first_conflict};
 pub use constraint::{Constraint, ConstraintSet};
+pub use ecbs::ecbs;
 pub use graph::{AdjacencyList, Graph, Grid, Vertex};
-pub use heuristic_search::{Budget, Limits, Stats};
+pub use heuristic_search::{Budget, Limits, Stats, Weight};
 pub use instance::{Agent, AgentId, Instance, InstanceError};
 pub use low_level::space_time_astar;
 pub use movingai::{

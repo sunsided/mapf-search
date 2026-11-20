@@ -1,19 +1,19 @@
-//! Property tests: on random tiny grids with 2-3 agents, CBS in every configuration agrees
-//! with the joint-space oracle on solvability and on the optimal sum of costs and makespan.
+//! Property tests: on random tiny grids with 2-3 agents, every solver agrees with the
+//! joint-space oracle on solvability (as far as it can prove it), and its plans are valid,
+//! conflict-free and within its guarantee over the optimal sum of costs or makespan.
 
-use heuristic_search::Limits;
 use mapf_search::{
-    Agent, CbsConfig, Grid, Instance, MapfResult, Objective, Outcome, Vertex, cbs_with,
-    first_conflict,
+    Agent, CbsConfig, Grid, Instance, Objective, Outcome, Vertex, Weight, first_conflict,
 };
 use proptest::prelude::*;
 
 use crate::oracle::{assert_valid_plan, optimal_cost};
+use crate::solvers::{Solver, assert_within};
 
-/// Constraint-tree expansions CBS may use on solvable instances.
+/// High-level expansions a solver may use on solvable instances.
 const SOLVABLE_BUDGET: u64 = 20_000;
 
-/// Constraint-tree expansions CBS may use on instances the oracle proves unsolvable.
+/// High-level expansions a solver may use on instances the oracle proves unsolvable.
 const UNSOLVABLE_BUDGET: u64 = 300;
 
 /// A random grid of 2-3 by 2-3 cells (3 by 4 for two agents), about one cell in six
@@ -62,46 +62,34 @@ fn grid(width: usize, height: usize, blocked: &[bool]) -> Grid {
     grid
 }
 
-/// Runs CBS with `config` and compares it with the oracle: the same solvability, and on
-/// solvable instances a valid, conflict-free plan of the optimal cost.
-fn check(grid: &Grid, agents: &[Agent], config: CbsConfig) -> Result<(), TestCaseError> {
-    check_optimal(grid, agents, config.objective, |instance, budget| {
-        cbs_with(instance, config, Limits::expansions(budget))
-    })
-}
-
-/// Runs an optimal solver for `objective` (given an instance and a budget) and compares it
-/// with the oracle, as [`check`] describes.
-pub fn check_optimal(
-    grid: &Grid,
-    agents: &[Agent],
-    objective: Objective,
-    solve: impl Fn(&Instance<Grid>, u64) -> MapfResult,
-) -> Result<(), TestCaseError> {
-    let optimum = optimal_cost(grid, agents, objective);
+/// Runs `solver` and compares it with the oracle: never `Solved` on an unsolvable instance,
+/// never `Unsolvable` on a solvable one, and when solved a valid, conflict-free plan within
+/// the solver's guarantee over the optimum.
+fn check(grid: &Grid, agents: &[Agent], solver: Solver) -> Result<(), TestCaseError> {
+    let optimum = optimal_cost(grid, agents, solver.objective());
     let budget = if optimum.is_some() {
         SOLVABLE_BUDGET
     } else {
         UNSOLVABLE_BUDGET
     };
     let instance = Instance::new(grid.clone(), agents.to_vec()).expect("valid by construction");
-    let result = solve(&instance, budget);
+    let result = solver.run(&instance, budget);
 
     match (optimum, result.outcome) {
         (Some(optimum), Outcome::Solved(solution)) => {
             let (soc, makespan) = assert_valid_plan(grid, agents, &solution.paths);
             prop_assert_eq!(first_conflict(&solution.paths), None);
             prop_assert_eq!((solution.sum_of_costs, solution.makespan), (soc, makespan));
-            prop_assert_eq!(solution.cost(objective), optimum);
+            assert_within(solver, solution.cost(solver.objective()), optimum);
         }
         (None, Outcome::Unsolvable | Outcome::LimitReached) => {}
-        (Some(_), Outcome::LimitReached) => {
+        (Some(_), Outcome::LimitReached) if solver.is_complete() => {
             // Plain CBS blows up on a few tightly coupled instances (about 1 in 600 here,
             // see `cases::hard_instance_needs_many_expansions`); discard them.
             prop_assume!(false, "needs more than {} expansions", SOLVABLE_BUDGET);
         }
         (optimum, outcome) => {
-            prop_assert!(false, "oracle {optimum:?}, solver {outcome:?}");
+            prop_assert!(false, "oracle {optimum:?}, {solver:?}: {outcome:?}");
         }
     }
 
@@ -111,7 +99,7 @@ pub fn check_optimal(
 proptest! {
     #![proptest_config(ProptestConfig {
         cases: 64,
-        // Bounds the hard instances discarded in `check`, so a CBS regression cannot hide.
+        // Bounds the hard instances discarded in `check`, so a regression cannot hide.
         max_global_rejects: 8,
         ..ProptestConfig::default()
     })]
@@ -119,25 +107,25 @@ proptest! {
     /// Plain CBS for sum of costs agrees with the oracle.
     #[test]
     fn plain_cbs_matches_joint_search_for_sum_of_costs((grid, agents) in instance()) {
-        check(&grid, &agents, CbsConfig::plain(Objective::SumOfCosts))?;
+        check(&grid, &agents, Solver::Cbs(CbsConfig::plain(Objective::SumOfCosts)))?;
     }
 
     /// Plain CBS for makespan agrees with the oracle.
     #[test]
     fn plain_cbs_matches_joint_search_for_makespan((grid, agents) in instance()) {
-        check(&grid, &agents, CbsConfig::plain(Objective::Makespan))?;
+        check(&grid, &agents, Solver::Cbs(CbsConfig::plain(Objective::Makespan)))?;
     }
 
     /// Improved CBS for sum of costs agrees with the oracle.
     #[test]
     fn improved_cbs_matches_joint_search_for_sum_of_costs((grid, agents) in instance()) {
-        check(&grid, &agents, CbsConfig::improved(Objective::SumOfCosts))?;
+        check(&grid, &agents, Solver::Cbs(CbsConfig::improved(Objective::SumOfCosts)))?;
     }
 
     /// Improved CBS for makespan (the CG heuristic is off there) agrees with the oracle.
     #[test]
     fn improved_cbs_matches_joint_search_for_makespan((grid, agents) in instance()) {
-        check(&grid, &agents, CbsConfig::improved(Objective::Makespan))?;
+        check(&grid, &agents, Solver::Cbs(CbsConfig::improved(Objective::Makespan)))?;
     }
 
     /// Each improvement alone keeps CBS optimal, for both objectives.
@@ -155,6 +143,21 @@ proptest! {
             _ => config.cardinal_heuristic = true,
         }
 
-        check(&grid, &agents, config)?;
+        check(&grid, &agents, Solver::Cbs(config))?;
+    }
+
+    /// ECBS with `w = 1` is optimal.
+    #[test]
+    fn ecbs_with_weight_one_is_optimal((grid, agents) in instance()) {
+        check(&grid, &agents, Solver::Ecbs(Weight::ONE))?;
+    }
+
+    /// ECBS stays within its suboptimality factor.
+    #[test]
+    fn ecbs_stays_within_its_bound(
+        (grid, agents) in instance(),
+        numerator in prop::sample::select(vec![11_u32, 15, 20, 30]),
+    ) {
+        check(&grid, &agents, Solver::Ecbs(Weight::new(numerator, 10)))?;
     }
 }

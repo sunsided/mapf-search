@@ -290,7 +290,7 @@ impl<'a, G: Graph> Search<'a, G> {
     fn expand(&mut self, parent: Node, conflict: Conflict) {
         self.stats.expanded += 1;
 
-        let children: Vec<(AgentId, Node)> = split(conflict)
+        let children: Vec<(AgentId, Node)> = Constraint::resolving(conflict)
             .into_iter()
             .filter_map(|constraint| Some((constraint.agent(), self.child(&parent, constraint)?)))
             .collect();
@@ -456,38 +456,4 @@ impl<'a, G: Graph> Search<'a, G> {
 fn is_bypass(parent: &Node, child: &Node, agent: AgentId) -> bool {
     path_cost(&child.paths[agent]) == path_cost(&parent.paths[agent])
         && child.conflict_count < parent.conflict_count
-}
-
-/// The two constraints that resolve `conflict`, one per agent.
-fn split(conflict: Conflict) -> [Constraint; 2] {
-    match conflict {
-        Conflict::Vertex {
-            agents: (a, b),
-            vertex,
-            time,
-        } => [a, b].map(|agent| Constraint::Vertex {
-            agent,
-            vertex,
-            time,
-        }),
-        Conflict::Edge {
-            agents: (a, b),
-            from,
-            to,
-            time,
-        } => [
-            Constraint::Edge {
-                agent: a,
-                from,
-                to,
-                time,
-            },
-            Constraint::Edge {
-                agent: b,
-                from: to,
-                to: from,
-                time,
-            },
-        ],
-    }
 }
