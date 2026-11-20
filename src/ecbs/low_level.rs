@@ -3,7 +3,9 @@
 //!
 //! The state includes the time, so a state's path cost `g` is its time and never improves;
 //! no state is reopened, and `f_min` stays a valid lower bound on the agent's optimal cost.
-//! The horizon is the one of the A* low level ([`crate::space_time_astar`]).
+//! The horizon is the one of the A* low level ([`crate::space_time_astar`]). The open list
+//! is `heuristic-search`'s [`FocalList`]: `f` orders it and decides focal membership,
+//! which is what a single-agent search needs.
 //!
 //! Finishing is a step of its own: from the goal, once the agent may stay there for good,
 //! a free step leads to a *finished* copy of the state, the only goal state. It costs the
@@ -13,13 +15,11 @@
 
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
-use core::cmp::Reverse;
 
-use heuristic_search::Weight;
+use heuristic_search::{FocalList, Weight};
 
 use crate::conflict_table::ConflictTable;
 use crate::constraint::ConstraintSet;
-use crate::focal::{FocalList, Handle};
 use crate::graph::{Graph, Vertex};
 use crate::instance::Agent;
 use crate::path::{Path, Time};
@@ -46,8 +46,6 @@ struct Node {
     conflicts: u32,
     /// The index of the predecessor in the node arena; `None` for the start.
     parent: Option<usize>,
-    /// Where the node sits in the focal list; `None` once expanded.
-    handle: Option<Handle>,
 }
 
 /// The single-agent problem [`focal_plan`] solves.
@@ -84,8 +82,8 @@ pub(super) fn focal_plan<G: Graph>(problem: &Problem<'_, G>, weight: Weight) -> 
     let h = bounds.heuristic(problem, start, 0)?;
     search.open((start, 0, false), 0, None, h);
 
-    while let Some((current, lower_bound)) = search.list.pop() {
-        search.nodes[current].handle = None;
+    while let Some(lower_bound) = search.list.min_f() {
+        let current = search.list.pop().expect("the list is not empty");
         if search.nodes[current].finished {
             return Some(FocalPath {
                 path: search.path(current),
@@ -139,8 +137,9 @@ struct Search {
     nodes: Vec<Node>,
     /// The arena index of each generated state.
     index: BTreeMap<Key, usize>,
-    /// The open nodes, as arena indices. Focal key: conflicts, `f`, larger `g` first.
-    list: FocalList<(u32, u32, Reverse<Time>), usize>,
+    /// The open nodes, as arena indices, with `f` as the order, the time as `g` and the
+    /// conflicts as the focal key; ties go to the smaller `f`, then the larger `g`.
+    list: FocalList<u32, u32>,
 }
 
 impl Search {
@@ -180,8 +179,7 @@ impl Search {
     fn open(&mut self, key: Key, conflicts: u32, parent: Option<usize>, h: u32) {
         let (vertex, time, finished) = key;
         let id = self.nodes.len();
-        let f = time + h;
-        let handle = self.list.push(f, f, (conflicts, f, Reverse(time)), id);
+        self.list.push(id, time + h, time, conflicts);
 
         self.nodes.push(Node {
             vertex,
@@ -189,7 +187,6 @@ impl Search {
             finished,
             conflicts,
             parent,
-            handle: Some(handle),
         });
         self.index.insert(key, id);
     }
@@ -202,15 +199,13 @@ impl Search {
         };
 
         let node = &mut self.nodes[id];
-        let Some(handle) = node.handle.filter(|_| conflicts < node.conflicts) else {
+        if !self.list.contains(id) || conflicts >= node.conflicts {
             return;
-        };
+        }
 
-        self.list.remove(handle);
-        let f = node.time + h;
         node.conflicts = conflicts;
         node.parent = Some(parent);
-        node.handle = Some(self.list.push(f, f, (conflicts, f, Reverse(node.time)), id));
+        self.list.push(id, node.time + h, node.time, conflicts);
     }
 
     /// The vertices from the start to node `last`, without the finishing step.

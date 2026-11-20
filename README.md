@@ -29,6 +29,27 @@ Multi-agent pathfinding: CBS, ECBS, CBS-TA, ICTS, PBS, M* and MAPF-LNS2.
 Pre-release. Milestones 1 to 5 are drafted; the API will change. See
 [docs/design.md](docs/design.md).
 
+## Breaking changes in this draft
+
+Nothing is published yet, but code written against earlier states of this branch breaks:
+
+- **Budgets are `impl Budget<Stats>`** (since `4b4f43b`). heuristic-search adopted
+  search-core's `Budget<T>`, which is generic over the statistics type, so every solver
+  here takes `budget: impl Budget<Stats>` instead of `impl Budget`. `Limits` and closures
+  over `&Stats` still work unchanged; a hand-written `impl Budget for MyBudget` must become
+  `impl Budget<Stats> for MyBudget`.
+- **Every solver takes an `Objective`**: `ecbs(instance, objective, weight, budget)`,
+  `pbs(instance, objective, budget)`, `icts(instance, objective, budget)` and
+  `mstar(instance, objective, budget)`.
+- **`mstar` runs recursive M\***; `mstar_with` and `MStarConfig::basic` select basic M*.
+- **`CbsConfig`**: `cardinal_heuristic: bool` became `heuristic: CbsHeuristic` (`None`,
+  `Cg`, `Dg`, `Wdg`), and the struct gained `splitting: Splitting` and
+  `conflict_avoidance: bool`. `CbsConfig::improved` (what `cbs` uses) now means DG,
+  disjoint splitting and the conflict avoidance table on top of the earlier improvements.
+- **`Constraint`** gained `PositiveVertex` and `PositiveEdge`, so exhaustive matches on it
+  need new arms, and `ConstraintSet::for_agent` adds the negative constraints that other
+  agents' positive constraints imply.
+
 ## License
 
 Licensed under either of

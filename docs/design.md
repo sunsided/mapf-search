@@ -277,8 +277,13 @@ draft (`../heuristic-search`, branch `draft/initial`, at `58ba6ec` when this was
 
 The CBS high level reuses heuristic-search's `Budget`, `Limits` and `Stats` for its own
 CT expansion counts, so callers limit both layers with the same types, and ECBS takes its
-`Weight`. These types are re-exported, which makes heuristic-search a **public dependency**: its breaking releases
-are breaking releases of this crate.
+`Weight`. These types are re-exported, which makes heuristic-search a **public
+dependency**: its breaking releases are breaking releases of this crate. That already
+happened once on this branch: heuristic-search moved `Budget` to search-core, where it is
+`Budget<T>`, generic over the statistics type, so every solver here now takes
+`impl Budget<Stats>` (`4b4f43b`). `Limits` and closures over `&Stats` work as before; a
+caller's own `impl Budget` must name `Stats`. The README lists this and the other breaking
+changes of the draft.
 
 ## Shared result types
 
@@ -316,8 +321,19 @@ most `w` times the optimum (see Objectives for makespan). `w` is heuristic-searc
   earlier ones' paths.
 - `w = 1` is optimal; the property tests check this against the oracle.
 
-TODO: switch to heuristic-search's `FocalList` (added in its `b5cc485`) once it settles.
-Both crates are changing in parallel, so this crate keeps a small local copy for now.
+**Focal lists.** The low level uses heuristic-search's `FocalList` (`push(item, f, g,
+key)` over dense arena ids, `pop`, `min_f`, `contains`): `f` orders it and decides focal
+membership, the time is `g`, the conflict count is the key, and its tie-breaks (smaller `f`,
+then larger `g`, then first in) are what the local list did. Re-keying an open state with
+fewer conflicts is a second `push`; `min_f` before the pop is the lower bound.
+
+The high level keeps the local `FocalList` (`focal.rs`). The upstream list admits an item
+to focal by its `f`, but ECBS's high level needs two values: the lower bound orders the
+list and is the `f_min` the guarantee is measured against, while the node's *cost*, which
+may be larger, must be within `w * f_min`. With the bound as `f`, upstream would admit
+nodes whose cost exceeds `w * f_min`, which breaks the guarantee; with the cost as `f`,
+`f_min` is no longer a lower bound on the optimum. Upstream would fit with a separate
+focal value (`push(item, f, value, g, key)` with `f <= value`), as the local list has.
 
 ## PBS (Ma et al. 2019)
 
@@ -528,8 +544,8 @@ lower bound on 4-connected grids. Moves stay 4-connected, as in the MAPF benchma
 ## Cross-crate needs
 
 None blocks the milestones done so far. The two API additions below belong in
-heuristic-search. Focal search is implemented locally for now (see ECBS) because both
-crates change in parallel. The lexicographic cost is implemented locally too
+heuristic-search. The high level's focal list is local (see ECBS for why the upstream one
+does not fit it). The lexicographic cost is implemented locally too
 (`low_level/lexicographic.rs`, a `(u32, u32)` pair implementing `heuristic_search::Cost`);
 a generic `Lexicographic<A, B>` in search-core or heuristic-search would replace it.
 
@@ -615,8 +631,8 @@ pub struct FocalResult<G: Successors> {
 
 `lower_bound` is essential: ECBS's high-level bound is the sum of the agents' `f_min`
 values, not their path costs. `Weight` is the existing rational weight. The ECBS high level
-is local to this crate. heuristic-search's `b5cc485` adds a `FocalList`; switching the
-local one to it is a TODO in `focal.rs`.
+is local to this crate. The low level now uses heuristic-search's `FocalList`; the high
+level cannot yet (see ECBS).
 
 ### Other needs
 

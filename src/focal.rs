@@ -1,14 +1,20 @@
-//! A focal list ([`FocalList`]): the open list of focal search, used by both levels of
-//! [`ecbs`](crate::ecbs()).
+//! A focal list ([`FocalList`]) with a separate focal *value*: the open list of ECBS's
+//! high level ([`ecbs`](crate::ecbs())).
 //!
 //! It holds items under two orders. The *open* order is by an admissible value `f`. The
 //! *focal* sublist is every item whose *value* is at most `w * f_min`, ordered by a free
 //! secondary key. Popping from the focal sublist keeps every pop's value within factor `w`
-//! of the lower bound `f_min`. For a single-agent search the value is `f` itself; ECBS's
-//! high level uses the lower bound of a node as `f` and its cost as the value.
+//! of the lower bound `f_min`. ECBS's high level uses the lower bound of a node as `f` and
+//! its cost as the value.
 //!
-//! TODO: `heuristic-search` gains a generic `FocalList` (its commit `b5cc485`). Switch to it
-//! once its API settles; this local copy exists because both crates change in parallel.
+//! The low level uses `heuristic-search`'s `FocalList` instead. That one decides focal
+//! membership by `f` itself (`f <= w * f_min`), which is right for a single-agent search,
+//! where the value is `f`. The high level needs the two apart: a node's lower bound orders
+//! the list and bounds the result, but its sum of costs, which may be larger, must be
+//! within `w` of `f_min`. Ordering by the lower bound and admitting by the lower bound
+//! would admit nodes whose cost exceeds the bound and break the `w` guarantee; ordering by
+//! the cost would lose `f_min` as a lower bound. So this list stays until the upstream one
+//! takes a separate value.
 
 use alloc::collections::{BTreeMap, BTreeSet};
 
