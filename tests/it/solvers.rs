@@ -5,7 +5,7 @@
 use heuristic_search::Limits;
 use mapf_search::{
     AdjacencyList, Agent, CbsConfig, Graph, Grid, Instance, MapfResult, Objective, Outcome, Weight,
-    cbs_with, ecbs,
+    cbs_with, ecbs, pbs,
 };
 
 use crate::oracle::{assert_valid_plan, optimal_cost};
@@ -17,15 +17,18 @@ pub enum Solver {
     Cbs(CbsConfig),
     /// ECBS with a suboptimality factor; bounded-suboptimal for sum of costs.
     Ecbs(Weight),
+    /// PBS; no guarantee, incomplete.
+    Pbs,
 }
 
 impl Solver {
     /// Every solver in a representative configuration, for sum of costs.
-    pub fn all() -> [Self; 3] {
+    pub fn all() -> [Self; 4] {
         [
             Self::Cbs(CbsConfig::plain(Objective::SumOfCosts)),
             Self::Cbs(CbsConfig::improved(Objective::SumOfCosts)),
             Self::Ecbs(Weight::new(3, 2)),
+            Self::Pbs,
         ]
     }
 
@@ -35,6 +38,7 @@ impl Solver {
         match self {
             Self::Cbs(config) => cbs_with(instance, config, limits),
             Self::Ecbs(weight) => ecbs(instance, weight, limits),
+            Self::Pbs => pbs(instance, limits),
         }
     }
 
@@ -42,25 +46,24 @@ impl Solver {
     pub fn objective(self) -> Objective {
         match self {
             Self::Cbs(config) => config.objective,
-            Self::Ecbs(_) => Objective::SumOfCosts,
+            Self::Ecbs(_) | Self::Pbs => Objective::SumOfCosts,
         }
     }
 
     /// The guaranteed factor over the optimum as `(numerator, denominator)`; `None` if the
     /// solver guarantees no quality.
-    #[expect(clippy::unnecessary_wraps, reason = "PBS will guarantee nothing")]
     pub fn bound(self) -> Option<(u32, u32)> {
         match self {
             Self::Cbs(_) => Some((1, 1)),
             Self::Ecbs(weight) => Some((weight.numerator(), weight.denominator())),
+            Self::Pbs => None,
         }
     }
 
     /// Returns `true` if the solver never gives up before its budget, so it returns
     /// `Solved` on every solvable instance given enough budget.
-    #[expect(clippy::unused_self, reason = "PBS will be incomplete")]
     pub fn is_complete(self) -> bool {
-        true
+        !matches!(self, Self::Pbs)
     }
 }
 

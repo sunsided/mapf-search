@@ -37,7 +37,7 @@ use heuristic_search::{Budget, Stats};
 use self::cardinal::{Cardinality, cardinality, vertex_cover_bound};
 use crate::conflict::{Conflict, conflicts};
 use crate::constraint::{Constraint, ConstraintSet};
-use crate::graph::Graph;
+use crate::graph::{Graph, Vertex};
 use crate::instance::{AgentId, Instance};
 use crate::low_level::{distance_tables, plan};
 use crate::mdd::Mdd;
@@ -313,7 +313,7 @@ impl<'a, G: Graph> Search<'a, G> {
 
     /// `parent` with the path of `agent` replaced by `path`, which satisfies the parent's
     /// constraints at the same cost, so the agent's MDD stays valid.
-    fn adopt(&self, parent: Node, agent: AgentId, path: &[crate::Vertex]) -> Node {
+    fn adopt(&self, parent: Node, agent: AgentId, path: &[Vertex]) -> Node {
         let mut paths = parent.paths;
         paths[agent] = path.to_vec();
 

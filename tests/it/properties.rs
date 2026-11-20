@@ -82,7 +82,8 @@ fn check(grid: &Grid, agents: &[Agent], solver: Solver) -> Result<(), TestCaseEr
             prop_assert_eq!((solution.sum_of_costs, solution.makespan), (soc, makespan));
             assert_within(solver, solution.cost(solver.objective()), optimum);
         }
-        (None, Outcome::Unsolvable | Outcome::LimitReached) => {}
+        (None, Outcome::Unsolvable | Outcome::LimitReached | Outcome::Exhausted) => {}
+        (Some(_), Outcome::LimitReached | Outcome::Exhausted) if !solver.is_complete() => {}
         (Some(_), Outcome::LimitReached) if solver.is_complete() => {
             // Plain CBS blows up on a few tightly coupled instances (about 1 in 600 here,
             // see `cases::hard_instance_needs_many_expansions`); discard them.
@@ -144,6 +145,12 @@ proptest! {
         }
 
         check(&grid, &agents, Solver::Cbs(config))?;
+    }
+
+    /// PBS plans are valid and no cheaper than the optimum; PBS may give up.
+    #[test]
+    fn pbs_plans_are_valid((grid, agents) in instance()) {
+        check(&grid, &agents, Solver::Pbs)?;
     }
 
     /// ECBS with `w = 1` is optimal.

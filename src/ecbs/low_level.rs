@@ -136,7 +136,9 @@ pub(super) fn focal_plan<G: Graph>(problem: &Problem<'_, G>, weight: Weight) -> 
         return None;
     }
 
-    let earliest_finish = constraints.blocked_until(agent.goal).map_or(0, |t| t + 1);
+    let earliest_finish = constraints
+        .blocked_until(agent.goal)
+        .map_or(0, |t| t.saturating_add(1));
     let vertices = Time::try_from(graph.vertex_count()).unwrap_or(Time::MAX);
     let horizon = constraints.latest_step().saturating_add(vertices);
     let heuristic = |vertex: Vertex, time: Time| {

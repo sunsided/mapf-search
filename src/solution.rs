@@ -52,6 +52,9 @@ pub enum Outcome {
     /// for some unsolvable instances, such as two agents swapping the ends of a corridor,
     /// the search space is infinite and complete solvers only ever stop this way.
     LimitReached,
+    /// An incomplete solver ([`pbs`](crate::pbs())) ran out of options before its budget.
+    /// This proves nothing: the instance may still be solvable.
+    Exhausted,
 }
 
 /// The result of a solver run.
@@ -69,7 +72,7 @@ impl MapfResult {
     pub fn solution(&self) -> Option<&Solution> {
         match &self.outcome {
             Outcome::Solved(solution) => Some(solution),
-            Outcome::Unsolvable | Outcome::LimitReached => None,
+            Outcome::Unsolvable | Outcome::LimitReached | Outcome::Exhausted => None,
         }
     }
 }

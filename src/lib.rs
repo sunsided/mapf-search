@@ -14,6 +14,7 @@
 //!   [`cbs_with`] and [`CbsConfig`] switch them individually.
 //! - [`ecbs`]: enhanced CBS, bounded-suboptimal for sum of costs within a [`Weight`] `w`,
 //!   with focal search at both levels.
+//! - [`pbs()`]: priority-based search, fast but neither optimal nor complete.
 //! - [`space_time_astar`]: the single-agent low level under [`Constraint`]s, built on the
 //!   `heuristic-search` crate's A*.
 //! - [`first_conflict`] and [`conflicts`]: conflict detection on any set of paths.
@@ -51,7 +52,6 @@
 //! - Conflict-based: CBS-TA, and more CBS improvements (DG/WDG heuristics,
 //!   disjoint splitting)
 //! - Cost-vector search: ICTS
-//! - Priority-based: PBS
 //! - Subdimensional: M*
 //! - Local repair: MAPF-LNS2
 //! - Partial expansion: EPEA*
@@ -80,6 +80,7 @@ mod low_level;
 mod mdd;
 mod movingai;
 mod path;
+mod pbs;
 mod solution;
 
 pub use cbs::{CbsConfig, cbs, cbs_with};
@@ -95,4 +96,5 @@ pub use movingai::{
     scenario_instance,
 };
 pub use path::{Objective, Path, Time, makespan, path_cost, position_at, sum_of_costs};
+pub use pbs::pbs;
 pub use solution::{MapfResult, Outcome, Solution};

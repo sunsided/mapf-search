@@ -2,10 +2,10 @@
 //! ([`space_time_astar`]), run by `heuristic_search::astar` over `(vertex, time)` states.
 //!
 //! The time-expanded graph is infinite, so successors are cut at a horizon: after the
-//! constraints' [`latest_step`](ConstraintSet::latest_step) the agent is free, and from any
-//! vertex that can reach the goal it does so within `vertex_count - 1` more steps. Every
-//! path that exists also exists within the horizon, so an exhausted search proves that the
-//! agent has no path.
+//! constraints' [`latest_step`](ConstraintSet::latest_step) the agent moves on a fixed
+//! graph (minus the vertices blocked forever), and from any vertex that can reach the goal
+//! there it does so within `vertex_count - 1` more steps. Every path that exists also exists
+//! within the horizon, so an exhausted search proves that the agent has no path.
 
 use alloc::vec::Vec;
 
@@ -66,7 +66,9 @@ pub(crate) fn plan<G: Graph>(
     }
 
     let space = SpaceTime::new(graph, constraints);
-    let earliest_finish = constraints.blocked_until(agent.goal).map_or(0, |t| t + 1);
+    let earliest_finish = constraints
+        .blocked_until(agent.goal)
+        .map_or(0, |t| t.saturating_add(1));
     let goal = |&(vertex, time): &State| vertex == agent.goal && time >= earliest_finish;
     let heuristic = heuristic_fn(|&(vertex, time): &State| {
         let distance = distances[vertex]?;
