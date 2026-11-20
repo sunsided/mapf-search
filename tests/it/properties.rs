@@ -19,7 +19,7 @@ const UNSOLVABLE_BUDGET: u64 = 60;
 
 /// A random grid of 2-3 by 2-3 cells (3 by 4 for two agents), about one cell in six
 /// blocked, with 2-3 agents on distinct free starts and distinct free goals.
-fn instance() -> impl Strategy<Value = (Grid, Vec<Agent>)> {
+pub(crate) fn instance() -> impl Strategy<Value = (Grid, Vec<Agent>)> {
     (2..=3_usize)
         .prop_flat_map(|agents| {
             let height = if agents == 2 { 2..=4_usize } else { 2..=3 };

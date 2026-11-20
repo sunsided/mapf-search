@@ -101,7 +101,7 @@ pub(crate) fn distances_to<G: Graph + ?Sized>(graph: &G, target: Vertex) -> Vec<
 }
 
 /// The in-neighbours of every vertex.
-fn reverse_adjacency<G: Graph + ?Sized>(graph: &G) -> Vec<Vec<Vertex>> {
+pub(crate) fn reverse_adjacency<G: Graph + ?Sized>(graph: &G) -> Vec<Vec<Vertex>> {
     let mut reverse = vec![Vec::new(); graph.vertex_count()];
     for from in 0..graph.vertex_count() {
         graph.neighbors(from, |to| reverse[to].push(from));

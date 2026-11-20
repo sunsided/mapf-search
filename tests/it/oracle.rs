@@ -13,7 +13,7 @@ use heuristic_search::{Limits, Outcome, Successors, dijkstra};
 use mapf_search::{Agent, Graph, Objective, Vertex};
 
 /// A joint state: every agent's vertex and a bit mask of finished agents.
-type JointState = (Vec<Vertex>, u32);
+pub(crate) type JointState = (Vec<Vertex>, u32);
 
 /// The joint state space of `agents` on `graph`.
 struct Joint<'a, G> {
@@ -27,11 +27,11 @@ struct Joint<'a, G> {
 
 /// One agent's choice for one joint step.
 #[derive(Clone, Copy)]
-struct Choice {
+pub(crate) struct Choice {
     /// Where the agent is after the step.
-    next: Vertex,
+    pub(crate) next: Vertex,
     /// Whether the agent finishes with this step (it stays at its goal for good).
-    finish: bool,
+    pub(crate) finish: bool,
 }
 
 impl<G: Graph> Joint<'_, G> {
@@ -108,7 +108,7 @@ impl<G: Graph> Successors for Joint<'_, G> {
 
 /// Returns `true` if agent `picked.len()` taking `choice` collides with the agents in
 /// `picked`: same target vertex, or a swap along an edge.
-fn collides(positions: &[Vertex], picked: &[Choice], choice: Choice) -> bool {
+pub(crate) fn collides(positions: &[Vertex], picked: &[Choice], choice: Choice) -> bool {
     let me = picked.len();
 
     picked.iter().enumerate().any(|(other, earlier)| {
@@ -122,7 +122,7 @@ fn collides(positions: &[Vertex], picked: &[Choice], choice: Choice) -> bool {
 }
 
 /// The joint state after every agent took its choice.
-fn apply(state: &JointState, picked: &[Choice]) -> JointState {
+pub(crate) fn apply(state: &JointState, picked: &[Choice]) -> JointState {
     let positions = picked.iter().map(|choice| choice.next).collect();
     let finished = picked
         .iter()
@@ -221,7 +221,7 @@ pub fn assert_valid_plan<G: Graph>(
 }
 
 /// The first time from which `path` stays at `goal`.
-fn arrival(path: &[Vertex], goal: Vertex) -> u32 {
+pub(crate) fn arrival(path: &[Vertex], goal: Vertex) -> u32 {
     let away = path.iter().rposition(|&vertex| vertex != goal);
 
     away.map_or(0, |time| u32::try_from(time + 1).expect("short paths"))

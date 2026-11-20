@@ -21,6 +21,9 @@
 //!   optimal, and able to prove unsolvability; [`mstar_with`] and [`MStarConfig`] select
 //!   basic M*, recursive M* without operator decomposition, and OD-M*.
 //! - [`pbs()`]: priority-based search, fast but neither optimal nor complete.
+//! - `mo_cbs`, with the `multi-objective` feature: multi-objective CBS (MO-CBS and
+//!   MO-CBS-t, over BOA* or NAMOA*dr), every Pareto-optimal plan when moves and waits
+//!   cost vectors.
 //!
 //! Every solver takes an [`Objective`]: sum of costs or makespan.
 //! - [`space_time_astar`]: the single-agent low level under [`Constraint`]s, built on the
@@ -85,6 +88,8 @@ mod icts;
 mod instance;
 mod low_level;
 mod mdd;
+#[cfg(feature = "multi-objective")]
+mod mo_cbs;
 mod movingai;
 mod mstar;
 mod path;
@@ -100,6 +105,10 @@ pub use heuristic_search::{Budget, Limits, Stats, Weight};
 pub use icts::icts;
 pub use instance::{Agent, AgentId, Instance, InstanceError};
 pub use low_level::space_time_astar;
+#[cfg(feature = "multi-objective")]
+pub use mo_cbs::{
+    LowLevel, MoCbsConfig, ParetoOutcome, ParetoResult, ParetoSolution, mo_cbs, mo_cbs_with,
+};
 pub use movingai::{
     ParseError, ParseErrorKind, ScenarioEntry, ScenarioError, parse_map, parse_scenario,
     scenario_instance,
