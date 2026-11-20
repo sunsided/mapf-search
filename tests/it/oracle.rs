@@ -5,11 +5,12 @@
 //! their positions plus one "finished" flag each. An unfinished agent at its goal may
 //! finish; from then on it stays there and pays nothing. Every other unfinished agent pays
 //! 1 per step, move or wait. This prices sum of costs under goal-stay exactly, including
-//! waits at the goal before leaving it again. The joint space is finite, so the search
-//! also proves unsolvability.
+//! waits at the goal before leaving it again. For makespan, a joint step costs 1 if any
+//! agent pays, else 0. The joint space is finite, so the search also proves
+//! unsolvability.
 
 use heuristic_search::{Limits, Outcome, Successors, dijkstra};
-use mapf_search::{Agent, Graph, Vertex};
+use mapf_search::{Agent, Graph, Objective, Vertex};
 
 /// A joint state: every agent's vertex and a bit mask of finished agents.
 type JointState = (Vec<Vertex>, u32);
@@ -20,6 +21,8 @@ struct Joint<'a, G> {
     graph: &'a G,
     /// The agents; at most 32.
     agents: &'a [Agent],
+    /// How the agents' step costs combine into the cost of a joint step.
+    objective: Objective,
 }
 
 /// One agent's choice for one joint step.
@@ -73,7 +76,11 @@ impl<G: Graph> Joint<'_, G> {
     ) {
         let index = picked.len();
         if index == self.agents.len() {
-            emit((), apply(state, picked), cost);
+            let joint_cost = match self.objective {
+                Objective::SumOfCosts => cost,
+                Objective::Makespan => u32::from(cost > 0),
+            };
+            emit((), apply(state, picked), joint_cost);
             return;
         }
 
@@ -126,13 +133,13 @@ fn apply(state: &JointState, picked: &[Choice]) -> JointState {
     (positions, finished)
 }
 
-/// The optimal sum of costs of `agents` on `graph`, or `None` if the instance is
+/// The optimal value of `objective` for `agents` on `graph`, or `None` if the instance is
 /// unsolvable.
 ///
 /// # Panics
 ///
 /// Panics for more than 32 agents.
-pub fn optimal_sum_of_costs<G: Graph>(graph: &G, agents: &[Agent]) -> Option<u32> {
+pub fn optimal_cost<G: Graph>(graph: &G, agents: &[Agent], objective: Objective) -> Option<u32> {
     assert!(agents.len() <= 32, "the oracle handles at most 32 agents");
 
     let all = if agents.len() == 32 {
@@ -141,7 +148,11 @@ pub fn optimal_sum_of_costs<G: Graph>(graph: &G, agents: &[Agent]) -> Option<u32
         (1 << agents.len()) - 1
     };
     let start = (agents.iter().map(|agent| agent.start).collect(), 0);
-    let joint = Joint { graph, agents };
+    let joint = Joint {
+        graph,
+        agents,
+        objective,
+    };
     let goal = |state: &JointState| state.1 == all;
 
     match dijkstra(&joint, start, &goal, Limits::NONE).outcome {
@@ -155,13 +166,17 @@ pub fn optimal_sum_of_costs<G: Graph>(graph: &G, agents: &[Agent]) -> Option<u32
 /// ends at its goal, moves only along edges or waits, and no two agents share a vertex or
 /// swap along an edge at any time, counting agents that wait at their goal.
 ///
-/// Returns the plan's sum of costs: per agent, the first time from which it stays at its
-/// goal.
+/// Returns the plan's sum of costs and makespan, from each agent's arrival: the first time
+/// from which it stays at its goal.
 ///
 /// # Panics
 ///
 /// Panics with a description of the first violation.
-pub fn assert_valid_plan<G: Graph>(graph: &G, agents: &[Agent], paths: &[Vec<Vertex>]) -> u32 {
+pub fn assert_valid_plan<G: Graph>(
+    graph: &G,
+    agents: &[Agent],
+    paths: &[Vec<Vertex>],
+) -> (u32, u32) {
     assert_eq!(paths.len(), agents.len(), "one path per agent");
 
     for (index, (agent, path)) in agents.iter().zip(paths).enumerate() {
@@ -193,11 +208,16 @@ pub fn assert_valid_plan<G: Graph>(graph: &G, agents: &[Agent], paths: &[Vec<Ver
         }
     }
 
-    agents
+    let arrivals: Vec<u32> = agents
         .iter()
         .zip(paths)
         .map(|(agent, path)| arrival(path, agent.goal))
-        .sum()
+        .collect();
+
+    (
+        arrivals.iter().sum(),
+        arrivals.iter().copied().max().unwrap_or(0),
+    )
 }
 
 /// The first time from which `path` stays at `goal`.

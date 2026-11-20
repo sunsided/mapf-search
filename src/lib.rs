@@ -9,7 +9,8 @@
 //! keeps blocking it. Two agents [`Conflict`] if they share a vertex at the same time or
 //! swap vertices along an edge.
 //!
-//! - [`cbs()`]: conflict-based search, optimal for [`sum_of_costs`].
+//! - [`cbs()`]: conflict-based search, optimal for [`sum_of_costs`] or [`makespan`]
+//!   ([`Objective`]).
 //! - [`space_time_astar`]: the single-agent low level under [`Constraint`]s, built on the
 //!   `heuristic-search` crate's A*.
 //! - [`first_conflict`] and [`conflicts`]: conflict detection on any set of paths.
@@ -22,7 +23,7 @@
 //! ## Example
 //!
 //! ```
-//! use mapf_search::{Agent, Grid, Instance, Limits, cbs, first_conflict};
+//! use mapf_search::{Agent, Grid, Instance, Limits, Objective, cbs, first_conflict};
 //!
 //! // Two agents swap the ends of a corridor that has one side pocket.
 //! let grid = Grid::parse(&["...", "@.@"]);
@@ -32,11 +33,11 @@
 //! ];
 //! let instance = Instance::new(grid, agents)?;
 //!
-//! let result = cbs(&instance, Limits::expansions(1_000));
+//! let result = cbs(&instance, Objective::SumOfCosts, Limits::expansions(1_000));
 //! let solution = result.solution().expect("the pocket lets them pass");
 //!
 //! assert_eq!(first_conflict(&solution.paths), None);
-//! assert_eq!(solution.cost, 7);
+//! assert_eq!(solution.sum_of_costs, 7);
 //! # Ok::<(), mapf_search::InstanceError>(())
 //! ```
 //!
@@ -79,4 +80,4 @@ pub use graph::{AdjacencyList, Graph, Grid, Vertex};
 pub use heuristic_search::{Budget, Limits, Stats};
 pub use instance::{Agent, AgentId, Instance, InstanceError};
 pub use low_level::space_time_astar;
-pub use path::{Path, Time, makespan, path_cost, position_at, sum_of_costs};
+pub use path::{Objective, Path, Time, makespan, path_cost, position_at, sum_of_costs};

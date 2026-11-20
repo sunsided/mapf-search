@@ -48,8 +48,16 @@ engine with pluggable policies.
   is `sum(len_i - 1)`.
 - **Makespan**: `max_i T_i`.
 
-Milestone 1 optimizes SoC only. Makespan-optimal CBS needs a different high-level key
-(max instead of sum) and the same low level; it comes with milestone 2.
+`cbs` takes an `Objective` (`SumOfCosts` or `Makespan`). Both use the same low level:
+each agent's path is the cheapest one under its constraints, so a CT node's makespan is
+a lower bound on the makespan of every solution below it, just as its SoC is for SoC.
+Ordering the CT by makespan is therefore makespan-optimal. Ties go to the lower SoC, but
+the result is not guaranteed to have the lowest SoC among all makespan-optimal plans:
+that would need a low level that may take longer paths up to the makespan bound.
+
+Makespan CBS also terminates on solvable instances: a node with makespan at most `M*`
+only has conflicts, and so constraints, at times up to `M*`, and there are finitely many
+such constraint sets. A `Solution` reports both values, `sum_of_costs` and `makespan`.
 
 ## Constraints
 
@@ -79,7 +87,8 @@ those paths.
 
 1. Root: no constraints; plan every agent independently. If an agent has no path at all,
    the instance is unsolvable.
-2. Pop the node with the lowest SoC (ties: fewer conflicts, then FIFO).
+2. Pop the node with the lowest objective value (ties: the other objective, then fewer
+   conflicts, then FIFO).
 3. Find a conflict between its paths. None: the paths are an optimal solution.
 4. Split: for a vertex conflict `(i, j, v, t)` create two children, one with
    `Vertex(i, v, t)` and one with `Vertex(j, v, t)`. For an edge conflict
@@ -196,10 +205,11 @@ so it stays `no_std` with `alloc`; reading files is the caller's job. Milestone 
   rules, not this crate's conflict detector. The joint state is the agents' positions plus
   a "finished" bit per agent; an unfinished agent at its goal may finish (stays there
   forever, pays nothing from then on), every other unfinished agent pays 1 per step. This
-  prices SoC with goal-stay exactly, including waits at the goal before leaving.
-- **Properties** (proptest, case count fixed in code): when the oracle finds an optimum,
-  CBS returns `Solved` with the same SoC and conflict-free paths that start at the
-  starts, end at the goals and use only edges and waits. When the oracle proves the
+  prices SoC with goal-stay exactly, including waits at the goal before leaving. For
+  makespan, a joint step costs 1 if any agent pays.
+- **Properties** (proptest, case count fixed in code), once per objective: when the
+  oracle finds an optimum, CBS returns `Solved` with the same objective value and
+  conflict-free paths that start at the starts, end at the goals and use only edges and waits. When the oracle proves the
   instance unsolvable, CBS does not return `Solved`. About 1 in 600 random solvable
   instances needs more than the 20 000 CT expansions the property test allows (plain CBS
   blows up on tightly coupled agents); those cases are discarded, and one of them
@@ -215,11 +225,12 @@ so it stays `no_std` with `alloc`; reading files is the caller's job. Milestone 
 1. **Done in this draft.** Instance types (graph trait, adjacency list, grid), conflict
    detection, constraints, space-time A* via heuristic-search, optimal CBS for SoC, oracle
    and property tests.
-2. Moving AI parser, makespan objective, MDDs, prioritized conflicts, CG heuristic,
-   conflict avoidance table, disjoint splitting.
-3. ECBS (focal search), PBS with a reservation table.
-4. ICTS (shares MDDs), M* (shares the joint state).
-5. SIPP and MAPF-LNS2; CBS-TA; EPEA*.
+2. **Done in this draft.** Makespan-optimal CBS; Moving AI `.map`/`.scen` parser.
+3. MDDs, prioritized conflicts, CG heuristic, conflict avoidance table (needs the
+   lexicographic cost from heuristic-search), disjoint splitting.
+4. ECBS (focal search), PBS with a reservation table.
+5. ICTS (shares MDDs), M* (shares the joint state).
+6. SIPP and MAPF-LNS2; CBS-TA; EPEA*.
 
 ## Cross-crate needs
 

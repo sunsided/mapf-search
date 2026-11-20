@@ -1,8 +1,9 @@
-//! Conflict-based search ([`cbs`], Sharon et al. 2015): optimal for sum of costs.
+//! Conflict-based search ([`cbs`], Sharon et al. 2015): optimal for sum of costs or for
+//! makespan ([`Objective`]).
 //!
 //! The high level is a best-first search over a constraint tree. Each node holds
 //! constraints and one path per agent that is optimal under them; the node with the lowest
-//! sum of costs is expanded by splitting its earliest conflict into two children, each of
+//! objective value is expanded by splitting its earliest conflict into two children, each of
 //! which forbids the conflict to one of the two agents and replans only that agent.
 //!
 //! ```mermaid
@@ -29,7 +30,7 @@ use crate::constraint::{Constraint, ConstraintSet};
 use crate::graph::Graph;
 use crate::instance::{AgentId, Instance};
 use crate::low_level::{distance_tables, plan};
-use crate::path::{Path, sum_of_costs};
+use crate::path::{Objective, Path, makespan, sum_of_costs};
 
 /// A conflict-free plan: one path per agent.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,14 +38,27 @@ pub struct Solution {
     /// The path of each agent, indexed by [`AgentId`]. Each starts at the agent's start and
     /// ends at its goal, where the agent stays.
     pub paths: Vec<Path>,
-    /// The sum of costs of [`Solution::paths`].
-    pub cost: u32,
+    /// The sum of costs of [`Solution::paths`] (see [`sum_of_costs`]).
+    pub sum_of_costs: u32,
+    /// The makespan of [`Solution::paths`] (see [`makespan`](crate::makespan())).
+    pub makespan: u32,
+}
+
+impl Solution {
+    /// The value of `objective` for this solution.
+    #[must_use]
+    pub fn cost(&self, objective: Objective) -> u32 {
+        match objective {
+            Objective::SumOfCosts => self.sum_of_costs,
+            Objective::Makespan => self.makespan,
+        }
+    }
 }
 
 /// How a run of [`cbs`] ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome {
-    /// A sum-of-costs optimal solution.
+    /// A solution that is optimal for the requested [`Objective`].
     Solved(Solution),
     /// Proven unsolvable: an agent cannot reach its goal even alone, or every branch of the
     /// constraint tree was closed.
@@ -76,7 +90,12 @@ impl CbsResult {
     }
 }
 
-/// Finds a sum-of-costs optimal conflict-free plan with conflict-based search.
+/// Finds a conflict-free plan that is optimal for `objective` with conflict-based search.
+///
+/// Constraint-tree nodes are ordered by `objective`, then by the other objective, then by
+/// the number of conflicts. For [`Objective::Makespan`], the solution has the optimal
+/// makespan; its sum of costs is low but not guaranteed minimal among all makespan-optimal
+/// plans, because each agent's path is still the cheapest one under its constraints.
 ///
 /// `budget` is asked before every constraint-tree expansion, with the counters described at
 /// [`CbsResult::stats`]; pass [`Limits::expansions`](crate::Limits::expansions) to bound the run.
@@ -85,7 +104,7 @@ impl CbsResult {
 /// # Examples
 ///
 /// ```
-/// use mapf_search::{Agent, Grid, Instance, Limits, cbs};
+/// use mapf_search::{Agent, Grid, Instance, Limits, Objective, cbs};
 ///
 /// // Two agents cross on a plus-shaped map; one has to wait.
 /// let grid = Grid::parse(&["@.@", "...", "@.@"]);
@@ -95,13 +114,18 @@ impl CbsResult {
 /// ];
 /// let instance = Instance::new(grid, agents)?;
 ///
-/// let result = cbs(&instance, Limits::expansions(1_000));
+/// let result = cbs(&instance, Objective::SumOfCosts, Limits::expansions(1_000));
 /// let solution = result.solution().expect("solvable");
-/// assert_eq!(solution.cost, 5);
+/// assert_eq!(solution.sum_of_costs, 5);
+/// assert_eq!(solution.makespan, 3);
 /// # Ok::<(), mapf_search::InstanceError>(())
 /// ```
-pub fn cbs<G: Graph>(instance: &Instance<G>, mut budget: impl Budget) -> CbsResult {
-    let mut search = Search::new(instance);
+pub fn cbs<G: Graph>(
+    instance: &Instance<G>,
+    objective: Objective,
+    mut budget: impl Budget,
+) -> CbsResult {
+    let mut search = Search::new(instance, objective);
     let outcome = search.run(&mut budget);
 
     CbsResult {
@@ -117,7 +141,9 @@ struct Node {
     /// One path per agent, optimal under its constraints.
     paths: Vec<Path>,
     /// Sum of costs of [`Node::paths`].
-    cost: u32,
+    sum_of_costs: u32,
+    /// Makespan of [`Node::paths`].
+    makespan: u32,
     /// The earliest conflict among [`Node::paths`]; `None` if they are a solution.
     conflict: Option<Conflict>,
     /// The number of conflicts among [`Node::paths`]; a tie-breaker.
@@ -126,9 +152,9 @@ struct Node {
 
 /// An open-list entry: a node and its order key.
 struct Entry {
-    /// The order key: sum of costs, then conflict count, then creation order. Smallest
-    /// first.
-    key: (u32, usize, u64),
+    /// The order key: the objective, the other objective, the conflict count, then
+    /// creation order. Smallest first.
+    key: (u32, u32, usize, u64),
     /// The node.
     node: Node,
 }
@@ -158,6 +184,8 @@ impl Ord for Entry {
 struct Search<'a, G> {
     /// The instance being solved.
     instance: &'a Instance<G>,
+    /// What the search minimizes.
+    objective: Objective,
     /// Distances to each agent's goal, indexed by agent.
     distances: Vec<Vec<Option<u32>>>,
     /// The open nodes.
@@ -168,9 +196,10 @@ struct Search<'a, G> {
 
 impl<'a, G: Graph> Search<'a, G> {
     /// Prepares a run: computes the distance tables.
-    fn new(instance: &'a Instance<G>) -> Self {
+    fn new(instance: &'a Instance<G>, objective: Objective) -> Self {
         Self {
             instance,
+            objective,
             distances: distance_tables(instance.graph(), instance.agents()),
             open: BinaryHeap::new(),
             stats: Stats::default(),
@@ -188,7 +217,8 @@ impl<'a, G: Graph> Search<'a, G> {
             let Some(conflict) = node.conflict else {
                 return Outcome::Solved(Solution {
                     paths: node.paths,
-                    cost: node.cost,
+                    sum_of_costs: node.sum_of_costs,
+                    makespan: node.makespan,
                 });
             };
 
@@ -256,7 +286,13 @@ impl<'a, G: Graph> Search<'a, G> {
 
     /// Opens `node`.
     fn push(&mut self, node: Node) {
-        let key = (node.cost, node.conflict_count, self.stats.generated);
+        let (soc, makespan) = (node.sum_of_costs, node.makespan);
+        let (first, second) = match self.objective {
+            Objective::SumOfCosts => (soc, makespan),
+            Objective::Makespan => (makespan, soc),
+        };
+        let key = (first, second, node.conflict_count, self.stats.generated);
+
         self.stats.generated += 1;
         self.open.push(Entry { key, node });
     }
@@ -268,7 +304,8 @@ fn node(constraints: Vec<Constraint>, paths: Vec<Path>) -> Node {
 
     Node {
         constraints,
-        cost: sum_of_costs(&paths),
+        sum_of_costs: sum_of_costs(&paths),
+        makespan: makespan(&paths),
         conflict: found.first().copied(),
         conflict_count: found.len(),
         paths,

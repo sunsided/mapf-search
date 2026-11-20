@@ -1,5 +1,5 @@
-//! Single-agent paths over discrete time and the joint objectives over them:
-//! [`sum_of_costs`] and [`makespan`].
+//! Single-agent paths over discrete time and the joint objectives over them
+//! ([`Objective`]): [`sum_of_costs`] and [`makespan`].
 //!
 //! A path lists the vertex an agent occupies at each time step, so `path[t]` is the
 //! position at time `t`. After its last entry the agent stays at that vertex forever
@@ -14,6 +14,15 @@ pub type Time = u32;
 
 /// The positions of one agent at `t = 0, 1, ...`. Never empty in a solution.
 pub type Path = Vec<Vertex>;
+
+/// What a multi-agent search minimizes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Objective {
+    /// The sum over agents of the final arrival time at the goal ([`sum_of_costs`]).
+    SumOfCosts,
+    /// The time the last agent arrives at its goal for good ([`makespan`]).
+    Makespan,
+}
 
 /// The vertex `path` occupies at `time`, counting the stay at the last vertex.
 ///

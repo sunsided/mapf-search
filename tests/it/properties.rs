@@ -1,11 +1,11 @@
 //! Property tests: on random tiny grids with 2-3 agents, CBS agrees with the joint-space
-//! oracle on solvability and on the optimal sum of costs.
+//! oracle on solvability and on the optimal sum of costs and makespan.
 
 use heuristic_search::Limits;
-use mapf_search::{Agent, Grid, Instance, Outcome, Vertex, cbs, first_conflict};
+use mapf_search::{Agent, Grid, Instance, Objective, Outcome, Vertex, cbs, first_conflict};
 use proptest::prelude::*;
 
-use crate::oracle::{assert_valid_plan, optimal_sum_of_costs};
+use crate::oracle::{assert_valid_plan, optimal_cost};
 
 /// Constraint-tree expansions CBS may use on solvable instances.
 const SOLVABLE_BUDGET: u64 = 20_000;
@@ -59,38 +59,56 @@ fn grid(width: usize, height: usize, blocked: &[bool]) -> Grid {
     grid
 }
 
+/// Runs CBS for `objective` and compares it with the oracle: the same solvability, and on
+/// solvable instances a valid, conflict-free plan of the optimal cost.
+fn check(grid: &Grid, agents: &[Agent], objective: Objective) -> Result<(), TestCaseError> {
+    let optimum = optimal_cost(grid, agents, objective);
+    let budget = if optimum.is_some() {
+        SOLVABLE_BUDGET
+    } else {
+        UNSOLVABLE_BUDGET
+    };
+    let instance = Instance::new(grid.clone(), agents.to_vec()).expect("valid by construction");
+    let result = cbs(&instance, objective, Limits::expansions(budget));
+
+    match (optimum, result.outcome) {
+        (Some(optimum), Outcome::Solved(solution)) => {
+            let (soc, makespan) = assert_valid_plan(grid, agents, &solution.paths);
+            prop_assert_eq!(first_conflict(&solution.paths), None);
+            prop_assert_eq!((solution.sum_of_costs, solution.makespan), (soc, makespan));
+            prop_assert_eq!(solution.cost(objective), optimum);
+        }
+        (None, Outcome::Unsolvable | Outcome::LimitReached) => {}
+        (Some(_), Outcome::LimitReached) => {
+            // Plain CBS blows up on a few tightly coupled instances (about 1 in 600 here,
+            // see `cases::hard_instance_needs_many_expansions`); discard them.
+            prop_assume!(false, "CBS needs more than {} expansions", SOLVABLE_BUDGET);
+        }
+        (optimum, outcome) => {
+            prop_assert!(false, "oracle {optimum:?}, CBS {outcome:?}");
+        }
+    }
+
+    Ok(())
+}
+
 proptest! {
     #![proptest_config(ProptestConfig {
         cases: 64,
-        // Bounds the hard instances discarded below, so a CBS regression cannot hide there.
+        // Bounds the hard instances discarded in `check`, so a CBS regression cannot hide.
         max_global_rejects: 8,
         ..ProptestConfig::default()
     })]
 
-    /// CBS solves exactly the instances the oracle solves, with a valid, conflict-free plan
-    /// of the optimal sum of costs.
+    /// CBS for sum of costs agrees with the oracle.
     #[test]
-    fn cbs_matches_joint_search((grid, agents) in instance()) {
-        let optimum = optimal_sum_of_costs(&grid, &agents);
-        let budget = if optimum.is_some() { SOLVABLE_BUDGET } else { UNSOLVABLE_BUDGET };
-        let instance = Instance::new(grid.clone(), agents.clone()).expect("valid by construction");
-        let result = cbs(&instance, Limits::expansions(budget));
+    fn cbs_matches_joint_search_for_sum_of_costs((grid, agents) in instance()) {
+        check(&grid, &agents, Objective::SumOfCosts)?;
+    }
 
-        match (optimum, result.outcome) {
-            (Some(optimum), Outcome::Solved(solution)) => {
-                prop_assert_eq!(first_conflict(&solution.paths), None);
-                prop_assert_eq!(assert_valid_plan(&grid, &agents, &solution.paths), optimum);
-                prop_assert_eq!(solution.cost, optimum);
-            }
-            (None, Outcome::Unsolvable | Outcome::LimitReached) => {}
-            (Some(_), Outcome::LimitReached) => {
-                // Plain CBS blows up on a few tightly coupled instances (about 1 in 600
-                // here, see `cases::hard_instance_needs_many_expansions`); discard them.
-                prop_assume!(false, "CBS needs more than {} expansions", SOLVABLE_BUDGET);
-            }
-            (optimum, outcome) => {
-                prop_assert!(false, "oracle {optimum:?}, CBS {outcome:?}");
-            }
-        }
+    /// CBS for makespan agrees with the oracle.
+    #[test]
+    fn cbs_matches_joint_search_for_makespan((grid, agents) in instance()) {
+        check(&grid, &agents, Objective::Makespan)?;
     }
 }

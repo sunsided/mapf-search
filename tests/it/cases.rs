@@ -4,10 +4,10 @@
 use heuristic_search::Limits;
 use mapf_search::{
     AdjacencyList, Agent, Conflict, Constraint, ConstraintSet, Grid, Instance, InstanceError,
-    Outcome, cbs, conflicts, first_conflict, space_time_astar,
+    Objective, Outcome, cbs, conflicts, first_conflict, space_time_astar,
 };
 
-use crate::oracle::{assert_valid_plan, optimal_sum_of_costs};
+use crate::oracle::{assert_valid_plan, optimal_cost};
 
 /// Two agents swapping along an edge is a conflict, reported for the first agent's move.
 #[test]
@@ -115,12 +115,15 @@ fn agent_steps_off_its_goal() {
     let agents = vec![Agent { start: 1, goal: 1 }, Agent { start: 0, goal: 2 }];
     let instance = Instance::new(graph.clone(), agents.clone()).expect("valid");
 
-    let result = cbs(&instance, Limits::expansions(1_000));
+    let result = cbs(&instance, Objective::SumOfCosts, Limits::expansions(1_000));
     let solution = result.solution().expect("solvable");
 
-    assert_eq!(solution.cost, 4);
-    assert_eq!(assert_valid_plan(&graph, &agents, &solution.paths), 4);
-    assert_eq!(optimal_sum_of_costs(&graph, &agents), Some(4));
+    assert_eq!(solution.sum_of_costs, 4);
+    assert_eq!(assert_valid_plan(&graph, &agents, &solution.paths).0, 4);
+    assert_eq!(
+        optimal_cost(&graph, &agents, Objective::SumOfCosts),
+        Some(4)
+    );
 }
 
 /// A goal behind a wall is proven unreachable at the root.
@@ -130,7 +133,10 @@ fn unreachable_goal_is_unsolvable() {
     let agents = vec![Agent { start: 0, goal: 2 }];
     let instance = Instance::new(grid, agents).expect("valid");
 
-    assert_eq!(cbs(&instance, Limits::NONE).outcome, Outcome::Unsolvable);
+    assert_eq!(
+        cbs(&instance, Objective::SumOfCosts, Limits::NONE).outcome,
+        Outcome::Unsolvable
+    );
 }
 
 /// Two agents swapping the ends of a corridor without room to pass: the constraint tree is
@@ -141,11 +147,11 @@ fn corridor_swap_hits_the_budget() {
     let agents = vec![Agent { start: 0, goal: 2 }, Agent { start: 2, goal: 0 }];
     let instance = Instance::new(grid.clone(), agents.clone()).expect("valid");
 
-    let result = cbs(&instance, Limits::expansions(200));
+    let result = cbs(&instance, Objective::SumOfCosts, Limits::expansions(200));
 
     assert_eq!(result.outcome, Outcome::LimitReached);
     assert_eq!(result.stats.expanded, 200);
-    assert_eq!(optimal_sum_of_costs(&grid, &agents), None);
+    assert_eq!(optimal_cost(&grid, &agents, Objective::SumOfCosts), None);
 }
 
 /// Instances with shared starts, shared goals or vertices outside the graph are rejected.
@@ -188,10 +194,17 @@ fn hard_instance_needs_many_expansions() {
     ];
     let instance = Instance::new(grid.clone(), agents.clone()).expect("valid");
 
-    let result = cbs(&instance, Limits::expansions(200_000));
+    let result = cbs(
+        &instance,
+        Objective::SumOfCosts,
+        Limits::expansions(200_000),
+    );
     let solution = result.solution().expect("solvable");
 
-    assert_eq!(solution.cost, 19);
-    assert_eq!(assert_valid_plan(&grid, &agents, &solution.paths), 19);
-    assert_eq!(optimal_sum_of_costs(&grid, &agents), Some(19));
+    assert_eq!(solution.sum_of_costs, 19);
+    assert_eq!(assert_valid_plan(&grid, &agents, &solution.paths).0, 19);
+    assert_eq!(
+        optimal_cost(&grid, &agents, Objective::SumOfCosts),
+        Some(19)
+    );
 }
