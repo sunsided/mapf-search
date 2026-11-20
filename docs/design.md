@@ -195,8 +195,20 @@ Support the grid benchmarks of Stern et al. (2019), <https://movingai.com/benchm
   name, map width, map height, start x, start y, goal x, goal y, optimal single-agent
   length (octile; for 4-connected grids it is only a lower bound check).
 
-Instances take the first `k` agents of a scenario. The parser reads strings, not files,
-so it stays `no_std` with `alloc`; reading files is the caller's job. Milestone 2.
+Implemented in `movingai.rs`: `parse_map` -> `Grid`, `parse_scenario` ->
+`Vec<ScenarioEntry>`, and `scenario_instance(grid, &entries, k)`, which builds an
+`Instance` from the first `k` entries. The parsers read strings, not files, so they stay
+`no_std` with `alloc`; reading files is the caller's job. They are lenient about what does
+not change meaning and strict about the rest:
+
+- header keys in any order, empty lines and CRLF line ends are accepted;
+- scenario fields are split on any whitespace;
+- every error carries its 1-based line and a `ParseErrorKind`;
+- `scenario_instance` checks the map size each entry declares, blocked start or goal cells,
+  and `Instance::new`'s rules (`ScenarioError`).
+
+The `optimal_length` column is kept as `f64`. It is the octile length, which is only a
+lower bound on 4-connected grids. Moves stay 4-connected, as in the MAPF benchmarks.
 
 ## Testing strategy
 
@@ -217,8 +229,11 @@ so it stays `no_std` with `alloc`; reading files is the caller's job. Milestone 
 - **Hand-made cases:** swapping conflict detected, goal-stay respected (another agent's
   path crosses a finished agent's goal), an agent that must step off its goal, unreachable
   goal (`Unsolvable`), corridor swap (`LimitReached` under a budget).
-- **Later:** Moving AI instances with known optimal SoC from published results, as slow
-  ignored tests; cross-checks between CBS, ICTS and M* once they exist.
+- **Parsers:** a hand-written 8x8 map with CRLF line ends and six agents, every
+  `ParseErrorKind` and `ScenarioError` variant, and CBS (both objectives) on the parsed
+  instance, checked by the oracle's plan checker.
+- **Later:** real Moving AI instances with known optimal SoC from published results, as
+  slow ignored tests (the benchmark files are not vendored); cross-checks between CBS, ICTS and M* once they exist.
 
 ## Milestones
 

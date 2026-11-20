@@ -14,6 +14,7 @@
 //! - [`space_time_astar`]: the single-agent low level under [`Constraint`]s, built on the
 //!   `heuristic-search` crate's A*.
 //! - [`first_conflict`] and [`conflicts`]: conflict detection on any set of paths.
+//! - [`parse_map`], [`parse_scenario`] and [`scenario_instance`]: Moving AI benchmarks.
 //!
 //! [`Budget`], [`Limits`] and [`Stats`] are re-exported from `heuristic-search`; they bound
 //! and count CBS's constraint-tree expansions.
@@ -50,7 +51,6 @@
 //! - Subdimensional: M*
 //! - Local repair: MAPF-LNS2
 //! - Partial expansion: EPEA*
-//! - Moving AI `.map` and `.scen` benchmarks
 //!
 //! See `docs/design.md` in the repository for the design and milestones.
 //!
@@ -71,6 +71,7 @@ mod constraint;
 mod graph;
 mod instance;
 mod low_level;
+mod movingai;
 mod path;
 
 pub use cbs::{CbsResult, Outcome, Solution, cbs};
@@ -80,4 +81,8 @@ pub use graph::{AdjacencyList, Graph, Grid, Vertex};
 pub use heuristic_search::{Budget, Limits, Stats};
 pub use instance::{Agent, AgentId, Instance, InstanceError};
 pub use low_level::space_time_astar;
+pub use movingai::{
+    ParseError, ParseErrorKind, ScenarioEntry, ScenarioError, parse_map, parse_scenario,
+    scenario_instance,
+};
 pub use path::{Objective, Path, Time, makespan, path_cost, position_at, sum_of_costs};

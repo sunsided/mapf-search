@@ -13,8 +13,9 @@ Multi-agent pathfinding: CBS, ECBS, CBS-TA, ICTS, PBS, M* and MAPF-LNS2.
 
 ## Status
 
-Pre-release. Milestone 1 (instance types, conflict detection, space-time A*, optimal CBS
-for sum of costs) is drafted; the API will change. See [docs/design.md](docs/design.md).
+Pre-release. Milestones 1 and 2 are drafted: instance types, conflict detection,
+space-time A*, CBS that is optimal for sum of costs or makespan, and Moving AI `.map`/`.scen`
+parsers; the API will change. See [docs/design.md](docs/design.md).
 
 ## License
 
