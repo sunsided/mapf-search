@@ -15,13 +15,10 @@ applyTo: "**/Cargo.toml,release-plz.toml,.github/workflows/release-plz.yml,**/CH
 - New dependencies must pass `cargo deny check`: allowed licenses, no advisories, no git or
   unknown-registry sources. Runtime dependencies are `heuristic-search`, `search-core` and
   the optional `multiobjective-search` only; adding one needs a reason in the PR.
-  `search-core` comes from crates.io. `heuristic-search` and `multiobjective-search` stay
-  `path` + `version` dependencies until they are released, and the crate cannot be published
-  before then (crates.io only has their 0.0.0 placeholders).
+  All of them come from crates.io.
 - Flag public API changes and require a `BREAKING CHANGE:` line for them.
 - `rust-version` is a signal, not a contract. Raising it is allowed when a dependency or a
   feature benefits. It needs a minor release and a changelog note, never a patch release.
-- Release jobs stay dormant until the repository variable `RELEASE_APP_CLIENT_ID` is set.
 - release-plz runs in git-only mode: it tags and creates GitHub Releases. `publish-crates-io.yml`
   publishes from the tag in the `crates-io` environment, via trusted publishing
   (`id-token: write`, no `CARGO_REGISTRY_TOKEN`). Keep it that way.

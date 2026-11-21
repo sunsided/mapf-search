@@ -29,15 +29,7 @@ applyTo: ".github/workflows/**,Taskfile.dist.yaml,**/Taskfile.dist.yaml,.pre-com
 - `fuzz/` is a separate nightly workspace. Its tasks live in `fuzz/Taskfile.dist.yaml`,
   included as `fuzz:`; CI's `fuzz` job mirrors `task fuzz:build` and `task fuzz:lint`.
 - `Cargo.lock` is not tracked (library crate; `fuzz/Cargo.lock` neither), so no step uses
-  `--locked`. Local builds use the hub `[patch.crates-io]`; CI resolves fresh from crates.io.
-- `search-core` is a plain crates.io dependency. `heuristic-search` and
-  `multiobjective-search` are unreleased path dependencies: every job that runs cargo checks
-  this repository out into `mapf-search/`, then calls
-  `./mapf-search/.github/actions/checkout-siblings` (secret `SIBLING_REPOS_TOKEN`) and sets
-  `defaults.run.working-directory: mapf-search`. Remove a sibling from the action once its
-  dependency moves to a crates.io release.
-- `cargo fmt` runs without `--all`: `--all` follows the path dependencies into the sibling
-  checkouts.
+  `--locked`. CI resolves fresh from crates.io.
 - `scripts/check-branch.sh` is the single definition of allowed branch names. It is used by
   the Taskfile, the hook and the CI `branch` job.
 - New jobs that should gate merges must also be added to branch protection. Mention that in

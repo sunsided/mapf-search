@@ -8,9 +8,50 @@
 [![License](https://img.shields.io/crates/l/mapf-search)](https://github.com/sunsided/mapf-search#license)
 [![unsafe forbidden](https://img.shields.io/badge/unsafe-forbidden-success.svg)](https://github.com/rust-secure-code/safety-dance/)
 
-Multi-agent pathfinding: CBS, ECBS, CBS-TA, ICTS, PBS, M*, MO-CBS and MAPF-LNS2.
+Multi-agent pathfinding: CBS, ECBS, ICTS, PBS, M\* and multi-objective MO-CBS on grids and
+general graphs.
 
-## Implemented
+Given a graph and a set of agents with start and goal vertices, the solvers find one path per
+agent so that no two agents ever share a vertex or swap along an edge. CBS, ICTS and M\*
+minimize the sum of costs or the makespan, ECBS stays within a given factor of the optimum,
+and PBS trades optimality for speed. The optimal solvers are checked against a joint-space oracle by
+property tests, and M\* also proves when an instance has no solution. The crate is
+`no_std` with `alloc`, uses the A\* of
+[heuristic-search](https://github.com/sunsided/heuristic-search) as its single-agent low
+level, and reads the Moving AI `.map` and `.scen` benchmark formats.
+
+## Who this is for
+
+- Robotics and warehouse automation: fleets of mobile robots or AGVs on a grid or a roadmap
+  graph that must reach their goals without collisions.
+- Game developers moving groups of units through tight corridors, where independent A\*
+  per unit deadlocks or collides.
+- Researchers who want CBS and its improvements (prioritized conflicts, bypass, CG/DG/WDG
+  heuristics, disjoint splitting) switchable one by one, next to ECBS, ICTS, PBS and M\*
+  on the same instance type.
+- Planners that trade off several costs per agent (time, energy, risk): MO-CBS returns every
+  Pareto-optimal joint plan, using
+  [multiobjective-search](https://github.com/sunsided/multiobjective-search) as its low
+  level.
+- For a single agent, use [heuristic-search](https://github.com/sunsided/heuristic-search)
+  directly; for many connectors on a diagram that may cross at a cost rather than never
+  meet, [connector-routing](https://github.com/sunsided/connector-routing) is the better
+  fit.
+
+## Installation
+
+```sh
+cargo add mapf-search
+```
+
+Or in `Cargo.toml`:
+
+```toml
+[dependencies]
+mapf-search = "0.1"
+```
+
+## Algorithms
 
 - CBS, optimal for sum of costs or makespan, with prioritized (cardinal) conflicts,
   bypass, the CG, DG and WDG heuristics, a conflict avoidance table and disjoint
@@ -30,16 +71,8 @@ Multi-agent pathfinding: CBS, ECBS, CBS-TA, ICTS, PBS, M*, MO-CBS and MAPF-LNS2.
 - Shared parts: conflict detection, constraints, space-time A* low level, MDDs, Moving AI
   `.map`/`.scen` parsers
 
-## Planned scope
-
-- Conflict-based: CBS-TA
-- Local repair: MAPF-LNS2
-- Partial expansion: EPEA*
-
-## Status
-
-Pre-release. Milestones 1 to 6 are drafted; the API will change. See
-[docs/design.md](https://github.com/sunsided/mapf-search/blob/main/docs/design.md).
+Not yet implemented: CBS-TA (conflict-based search with task assignment), MAPF-LNS2
+(large neighborhood search repair) and EPEA\* (enhanced partial expansion).
 
 ## Usage
 
@@ -69,33 +102,6 @@ over `multiobjective-search`.
 
 Rust 1.86 (`rust-version` in `Cargo.toml`), for every feature. The MSRV is a signal, not a
 contract: it may rise in a minor release.
-
-## Breaking changes in this draft
-
-Nothing is published yet, but code written against earlier states of this branch breaks:
-
-- **Budgets are `impl Budget<Stats>`** (since `4b4f43b`). heuristic-search adopted
-  search-core's `Budget<T>`, which is generic over the statistics type, so every solver
-  here takes `budget: impl Budget<Stats>` instead of `impl Budget`. `Limits` and closures
-  over `&Stats` still work unchanged; a hand-written `impl Budget for MyBudget` must become
-  `impl Budget<Stats> for MyBudget`.
-- **Every solver takes an `Objective`**: `ecbs(instance, objective, weight, budget)`,
-  `pbs(instance, objective, budget)`, `icts(instance, objective, budget)` and
-  `mstar(instance, objective, budget)`.
-- **`mstar` runs recursive M\* with operator decomposition (ODrM\*)**, as does
-  `MStarConfig::default()` (for sum of costs); `mstar_with` and `MStarConfig` (now with
-  `operator_decomposition`) select basic M*, rM* and OD-M*.
-- **`CbsConfig`**: `cardinal_heuristic: bool` became `heuristic: CbsHeuristic` (`None`,
-  `Cg`, `Dg`, `Wdg`), and the struct gained `splitting: Splitting` and
-  `conflict_avoidance: bool`. `CbsConfig::improved` (what `cbs` uses) now means DG,
-  disjoint splitting and the conflict avoidance table on top of the earlier improvements.
-- **`MoCbsConfig`** gained `feasibility_check`, `prioritize_conflicts`, `bypass` and
-  `splitting`, so struct literals need them (or `..MoCbsConfig::plain()`), and `mo_cbs`
-  and `MoCbsConfig::default()` now mean `MoCbsConfig::improved()` instead of
-  `MoCbsConfig::tree_by_tree()`. The front is the same.
-- **`Constraint`** gained `PositiveVertex` and `PositiveEdge`, so exhaustive matches on it
-  need new arms, and `ConstraintSet::for_agent` adds the negative constraints that other
-  agents' positive constraints imply.
 
 ## License
 

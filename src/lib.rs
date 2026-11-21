@@ -59,17 +59,7 @@
 //! # Ok::<(), mapf_search::InstanceError>(())
 //! ```
 //!
-//! ## Planned scope
-//!
-//! - Conflict-based: CBS-TA
-//! - Local repair: MAPF-LNS2
-//! - Partial expansion: EPEA*
-//!
-//! See `docs/design.md` in the repository for the design and milestones.
-//!
-//! ## Status
-//!
-//! Pre-release. The API will change.
+//! Not yet implemented: CBS-TA, MAPF-LNS2 and EPEA*.
 //!
 //! Repository: <https://github.com/sunsided/mapf-search>
 

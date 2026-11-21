@@ -4,12 +4,6 @@
 ICTS, PBS, M* and, behind the `multi-objective` feature, MO-CBS), with strict conventions.
 Path-specific rules live in `.github/instructions/*.instructions.md`.
 
-- `search-core` is a crates.io dependency. CI resolves it from crates.io; local development
-  may build against a sibling checkout through an untracked hub `.cargo/config.toml`
-  (`[patch.crates-io]`) one directory above this repository.
-- `heuristic-search` and `multiobjective-search` are unreleased path dependencies
-  (`path = "../x"`, `version = "0.0.0"`). Local development and CI expect their checkouts
-  next to this repository; CI checks them out with `.github/actions/checkout-siblings`.
 - Run checks through the Taskfile: `task ci` mirrors CI. `task lint`, `task test` and
   `task doc` are the common entry points.
 - Every item gets a doc comment, private items included. No `mod.rs` files (use `foo.rs`

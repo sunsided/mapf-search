@@ -2,7 +2,7 @@
 
 Multi-agent pathfinding (MAPF): find one path per agent so that no two agents collide,
 minimizing a joint objective. This crate hosts the conflict-based family (CBS, ECBS,
-CBS-TA), ICTS, PBS, M*, MAPF-LNS2 and EPEA*.
+MO-CBS), ICTS, PBS and M*; CBS-TA, MAPF-LNS2 and EPEA* are on the roadmap.
 
 These algorithms share the problem model, path conflicts, joint objectives, constraints
 and reservations, and the single-agent low-level search. They do **not** share one search
@@ -18,8 +18,7 @@ engine with pluggable policies.
   a callback (like `heuristic_search::Successors`), so grids need no adjacency lists.
   Two implementations ship: `AdjacencyList` (explicit lists) and `Grid` (4-connected,
   row-major `y * width + x`, with blocked cells). Generic vertex types (coordinates,
-  roadmap nodes) can map onto dense ids; a generic `V` was dropped from the placeholder's
-  `Conflict<V>` because distance tables and constraint sets want dense indices.
+  roadmap nodes) can map onto dense ids; `Conflict` has no generic `V`, because distance tables and constraint sets want dense indices.
 - **Agents.** Each agent has a start and a goal vertex. Starts are pairwise distinct and
   goals are pairwise distinct; `Instance::new` rejects anything else, and vertices out of
   range.
@@ -137,8 +136,8 @@ those paths.
    `(i, j, u, v, t)` the children get `Edge(i, u, v, t)` and `Edge(j, v, u, t)`.
 5. In each child, replan only the constrained agent. If it has no path, drop the child.
 
-**Improvements** (milestone 3). `cbs` uses all of them; `cbs_with` takes a `CbsConfig`
-that switches each one (`CbsConfig::plain` is milestone 1's CBS). None changes the
+**Improvements.** `cbs` uses all of them; `cbs_with` takes a `CbsConfig`
+that switches each one (`CbsConfig::plain` is the original CBS). None changes the
 objective value of the result.
 
 - **MDDs.** `Mdd` holds every path of one agent that arrives at its goal at exactly a
@@ -213,9 +212,9 @@ objective value of the result.
 parent's paths satisfy all of its constraints, and the new constraint is violated by
 them. Two CT nodes in different branches can still end up with the same constraint set,
 added in different orders (sibling A adds `c_i`, sibling B adds `c_j`, and later
-descendants of each add the other). Such duplicates cost work, not optimality. Milestone 1
-does no CT duplicate detection; each node stores its full constraint list (a CT node is
-small next to its paths). A later milestone can hash the sorted constraint set and skip
+descendants of each add the other). Such duplicates cost work, not optimality. CBS does
+no CT duplicate detection; each node stores its full constraint list (a CT node is
+small next to its paths). A later version can hash the sorted constraint set and skip
 known ones. Low-level duplicates are handled by the A* closed list on `(vertex, time)`.
 
 **Termination.** CBS terminates with an optimal solution if one exists. On an unsolvable
@@ -270,20 +269,15 @@ instead of 10 000 there.
 
 Its API fits without changes: `Successors` with a callback is the time-expanded adapter,
 `Goal` and `Heuristic` are closures, `Cost = u32`, and `Outcome::Unsolvable` with the
-horizon is a proof. The crate depends on it through a path dependency on the sibling
-draft (`../heuristic-search`, branch `draft/initial`, at `dbc85f8` when this was last
-updated).
-**The path dependency must become a crates.io version before `mapf-search` is published.**
+horizon is a proof.
 
 The CBS high level reuses heuristic-search's `Budget`, `Limits` and `Stats` for its own
 CT expansion counts, so callers limit both layers with the same types, and ECBS takes its
 `Weight`. These types are re-exported, which makes heuristic-search a **public
-dependency**: its breaking releases are breaking releases of this crate. That already
-happened once on this branch: heuristic-search moved `Budget` to search-core, where it is
-`Budget<T>`, generic over the statistics type, so every solver here now takes
-`impl Budget<Stats>` (`4b4f43b`). `Limits` and closures over `&Stats` work as before; a
-caller's own `impl Budget` must name `Stats`. The README lists this and the other breaking
-changes of the draft.
+dependency**: its breaking releases are breaking releases of this crate. `Budget` itself is
+search-core's `Budget<T>`, generic over the statistics type, so every solver here takes
+`impl Budget<Stats>`; `Limits` and closures over `&Stats` implement it, and a caller's own
+budget implements `Budget<Stats>`.
 
 ## Shared result types
 
@@ -531,7 +525,7 @@ answer is the Pareto-optimal front, one plan per Pareto-optimal cost vector.
 ### Decision: the low level from multiobjective-search
 
 The low level must return all cost-unique Pareto-optimal paths of one agent under its
-constraints. multiobjective-search (sibling draft, path dependency, `main` at `d333a8a`)
+constraints. multiobjective-search
 already has NAMOA*dr and BOA*, and its interfaces fit a space-time graph without
 changes: `Graph` with `State = (Vertex, Time)` and `Weight = [u32; N]` is the
 time-expanded adapter, the heuristic is a `search_core::Heuristic` closure, and goal
@@ -554,10 +548,6 @@ rose to multiobjective-search's 1.86.
   the weights (`LowLevel::Auto`). `LowLevel::NamoaDr` forces NAMOA*dr for any `N`.
 - **Budget.** Neither search takes a budget; the adapter asks it instead (see Budget
   inside the low level).
-
-The sibling's working tree had uncommitted changes (a new `mvh` module) while this was
-written; they compiled and do not touch NAMOA*dr or BOA*, but the checks ran against
-that tree, not a clean `d333a8a`.
 
 ### Improvements
 
@@ -729,8 +719,7 @@ lower bound on 4-connected grids. Moves stay 4-connected, as in the MAPF benchma
   1 in 600 random solvable instances needs more than the 20 000 expansions the property
   test allows (plain CBS blows up on tightly coupled agents); those cases are discarded, and
   one of them (63 000 expansions for plain CBS, about 740 improved) is kept as a
-  regression test. Each property passed 1 500 cases once in release mode (at `8290dab`,
-  and the WDG ones and the each-improvement one again at `08a75a1`), as did the
+  regression test. Each property passed 1 500 cases once in release mode, as did the
   crate-internal heuristic admissibility property.
 - **Cross-checks** on random 4x4 to 5x5 grids with 3-4 agents, too large for the oracle:
   improved CBS, ICTS and every form of M* agree on the optimum (either objective)
@@ -766,34 +755,16 @@ lower bound on 4-connected grids. Moves stay 4-connected, as in the MAPF benchma
 - **Later:** real Moving AI instances with known optimal SoC from published results, as
   slow ignored tests (the benchmark files are not vendored).
 
-## Milestones
+## Roadmap
 
-1. **Done in this draft.** Instance types (graph trait, adjacency list, grid), conflict
-   detection, constraints, space-time A* via heuristic-search, optimal CBS for SoC, oracle
-   and property tests.
-2. **Done in this draft.** Makespan-optimal CBS; Moving AI `.map`/`.scen` parser.
-3. **Done in this draft:** MDDs, prioritized conflicts, bypass, CG, DG and WDG
-   heuristics, conflict avoidance table, disjoint splitting.
-4. **Done in this draft:** ECBS (local focal list), PBS (with `block_from`).
-5. **Done in this draft:** ICTS (shares MDDs), basic and recursive M*, every solver for
-   both objectives, operator decomposition (OD-M*, ODrM*).
-6. **Done in this draft:** MO-CBS with its -t, -n and -b variants, the feasibility
-   check, ICBS-style improvements, a low-level budget hook and per-agent costs (feature
-   `multi-objective`).
-7. SIPP and MAPF-LNS2; CBS-TA; EPEA*.
+SIPP, MAPF-LNS2, CBS-TA and EPEA*.
 
 ## Cross-crate needs
 
-None blocks the milestones done so far. The high level's focal list is local (see ECBS
+The high level's focal list is local (see ECBS
 for why the upstream one does not fit it). The lexicographic cost below is now
-search-core's `Lexicographic<P, S>` (search-core 0.2, API as of `ff12e3f`); this crate depends on
+search-core's `Lexicographic<P, S>`; this crate depends on
 search-core directly for it and dropped its local `low_level/lexicographic.rs`.
-
-Milestones 3 to 5 were developed against an export of heuristic-search's `b5cc485`,
-because its working tree was mid-change and did not compile at the time. The final checks
-ran against the path dependency at `58ba6ec`. Disjoint splitting and DG/WDG were developed
-against an export of its `2d1f1ba` for the same reason; everything since was checked
-against the path dependency at `dbc85f8`.
 
 ### Secondary tie-break: a lexicographic cost (done in search-core)
 
@@ -881,9 +852,6 @@ level cannot yet (see ECBS).
 - **Reuse across calls.** CBS calls the low level thousands of times, and each call
   allocates a fresh search space and open list. A reusable search context would save
   those allocations. Measure first.
-- **Publish.** The path dependency must become a crates.io version before this crate is
-  published. `Budget`, `Limits` and `Stats` are re-exported, so heuristic-search is a
-  public dependency.
 
 ## References
 

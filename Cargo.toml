@@ -1,6 +1,6 @@
 [package]
 name = "mapf-search"
-description = "Multi-agent pathfinding: CBS, ECBS, CBS-TA, ICTS, PBS, M*, MO-CBS and MAPF-LNS2"
+description = "Multi-agent pathfinding on grids and graphs: CBS with its improvements, ECBS, ICTS, PBS, M* and multi-objective MO-CBS"
 version = "0.0.0"
 edition = "2024"
 rust-version = "1.86"
@@ -8,8 +8,8 @@ authors = ["Markus Mayer <widemeadows@gmail.com>"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/sunsided/mapf-search"
 readme = "README.md"
-keywords = ["mapf", "pathfinding", "multi-agent", "cbs", "search"]
-categories = ["algorithms", "science::robotics", "no-std"]
+keywords = ["mapf", "multi-agent", "pathfinding", "cbs", "robotics"]
+categories = ["algorithms", "science::robotics", "game-development", "no-std"]
 # Repository tooling stays out of the published crate.
 exclude = [
     ".github/",

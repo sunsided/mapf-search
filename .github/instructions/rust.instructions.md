@@ -30,7 +30,7 @@ applyTo: "**/*.rs"
   `Solution` is conflict-free (`first_conflict` is `None`), with each path running from the
   agent's start to its goal. Optimal solvers have a proptest against the joint-space oracle
   in `tests/it/`; a new solver gets one too.
-- Public API changes go with a matching update to the README status list, the crate docs in
+- Public API changes go with a matching update to the README "Algorithms" list, the crate docs in
   `lib.rs` and `docs/design.md`.
 - Mermaid diagrams in doc comments must match the code they describe. Update them when the
   structure changes.
