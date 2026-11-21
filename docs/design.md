@@ -537,8 +537,8 @@ changes: `Graph` with `State = (Vertex, Time)` and `Weight = [u32; N]` is the
 time-expanded adapter, the heuristic is a `search_core::Heuristic` closure, and goal
 labels are recorded, not expanded, which is what goal-stay needs. Writing a local
 NAMOA*-st would have duplicated a tested frontier implementation. The cost: the
-dependency is optional so the default build keeps one dependency, and with the feature
-on the MSRV is multiobjective-search's 1.86 instead of 1.85.
+dependency is optional so the default build keeps one dependency, and the crate's MSRV
+rose to multiobjective-search's 1.86.
 
 - **Graph.** `SpaceTime` in `mo_cbs/low_level.rs`: successors are the wait and every
   edge, priced by `costs`, minus what `ConstraintSet::allows` forbids; the goal test is

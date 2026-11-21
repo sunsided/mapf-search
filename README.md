@@ -67,9 +67,8 @@ over `multiobjective-search`.
 
 ## MSRV
 
-Rust 1.85 (`rust-version` in `Cargo.toml`). The feature `multi-objective` needs Rust 1.86,
-the MSRV of `multiobjective-search`. The MSRV is a signal, not a contract: it may rise in a
-minor release.
+Rust 1.86 (`rust-version` in `Cargo.toml`), for every feature. The MSRV is a signal, not a
+contract: it may rise in a minor release.
 
 ## Breaking changes in this draft
 

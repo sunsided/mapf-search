@@ -27,8 +27,8 @@ needs before it can be merged.
    `Cargo.lock` is not tracked (library crate), so the path entries the patch writes into
    the local lock never reach a commit. CI resolves fresh from crates.io.
 2. Install Rust via [rustup](https://rustup.rs/). Development uses current stable; the MSRV
-   in `Cargo.toml` (`rust-version`) applies to the library with default features, not to
-   tests and benches; the `multi-objective` feature needs Rust 1.86.
+   in `Cargo.toml` (`rust-version`) applies to the library with every feature, not to
+   tests and benches.
 3. Install [Task](https://taskfile.dev/installation/). All commands below go through it. Run
    `task` to list them.
 4. Optional tools: the tasks tell you when one is missing.

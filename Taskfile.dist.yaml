@@ -158,14 +158,12 @@ tasks:
       - cargo deny --all-features check
 
   msrv:
-    desc: Check every crate on its declared rust-version (library, default features; dev-dependencies may need newer Rust)
+    desc: Check every crate on its declared rust-version (library, all features; dev-dependencies may need newer Rust)
     preconditions:
       - sh: cargo hack --version
         msg: "cargo-hack not found - cargo install --locked cargo-hack"
     cmds:
-      # Default features only: multi-objective pulls in multiobjective-search, which needs Rust
-      # 1.86, above this crate's rust-version (1.85).
-      - cargo hack check --rust-version --workspace --ignore-private
+      - cargo hack check --rust-version --workspace --ignore-private --all-features
 
   semver:
     desc: Check published library crates for semver violations
