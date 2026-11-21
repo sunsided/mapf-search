@@ -26,7 +26,7 @@ exclude = [
 
 [dependencies]
 # Low-level A*.
-heuristic-search = "0.1"
+heuristic-search = "0.2"
 # The conflict-avoidance low level's `Lexicographic` cost. Must be the same version that
 # heuristic-search uses, so that its `Cost` trait is the one A* runs on. A crates.io
 # dependency; local development may patch it to a sibling checkout (CONTRIBUTING.md).
