@@ -1,9 +1,13 @@
-//! Moving AI parsers: well-formed files, every error kind, and CBS on a parsed instance.
+//! Moving AI parsers: well-formed files, every error kind, round trips of random maps, and
+//! CBS on a parsed instance.
+
+use std::fmt::Write;
 
 use mapf_search::{
-    Agent, ConstraintSet, Graph, Limits, Objective, ParseError, ParseErrorKind, ScenarioError, cbs,
-    parse_map, parse_scenario, path_cost, scenario_instance, space_time_astar,
+    Agent, ConstraintSet, Graph, Grid, Limits, Objective, ParseError, ParseErrorKind,
+    ScenarioError, cbs, parse_map, parse_scenario, path_cost, scenario_instance, space_time_astar,
 };
+use proptest::prelude::*;
 
 use crate::oracle::assert_valid_plan;
 
@@ -217,4 +221,63 @@ fn scenario_instance_errors_are_reported() {
         ),
         ScenarioError::Instance(_)
     ));
+}
+
+/// Renders `grid` as a `.map` file. Cell `v` is written as the free or the blocked symbol of
+/// `symbols[v % symbols.len()]`; lines end in CRLF if `crlf` is set.
+fn render(grid: &Grid, symbols: &[(char, char)], crlf: bool) -> String {
+    let end = if crlf { "\r\n" } else { "\n" };
+    let mut text = format!(
+        "type octile{end}height {}{end}width {}{end}map{end}",
+        grid.height(),
+        grid.width()
+    );
+    for y in 0..grid.height() {
+        for x in 0..grid.width() {
+            let vertex = grid.vertex(x, y);
+            let (free, blocked) = symbols[vertex % symbols.len()];
+            text.push(if grid.is_blocked(vertex) {
+                blocked
+            } else {
+                free
+            });
+        }
+        write!(text, "{end}").expect("writing to a String cannot fail");
+    }
+
+    text
+}
+
+/// A random grid of up to 12 by 12 cells, about one in four blocked.
+fn grid() -> impl Strategy<Value = Grid> {
+    (1..=12_usize, 1..=12_usize)
+        .prop_flat_map(|(width, height)| {
+            let blocked = prop::collection::vec(prop::bool::weighted(0.25), width * height);
+            (Just(width), Just(height), blocked)
+        })
+        .prop_map(|(width, height, blocked)| {
+            let mut grid = Grid::new(width, height);
+            for vertex in (0..blocked.len()).filter(|&vertex| blocked[vertex]) {
+                let (x, y) = grid.cell(vertex);
+                grid.block(x, y);
+            }
+
+            grid
+        })
+}
+
+/// Pairs of a free and a blocked map symbol, cycled over the cells.
+fn symbols() -> impl Strategy<Value = Vec<(char, char)>> {
+    let free = prop::sample::select(vec!['.', 'G', 'S']);
+    let blocked = prop::sample::select(vec!['@', 'O', 'T', 'W']);
+    prop::collection::vec((free, blocked), 1..=4)
+}
+
+proptest! {
+    /// Every grid survives rendering to a `.map` file, with any mix of the free and blocked
+    /// symbols and either line end, and parsing it back.
+    #[test]
+    fn map_round_trips(grid in grid(), symbols in symbols(), crlf in any::<bool>()) {
+        prop_assert_eq!(parse_map(&render(&grid, &symbols, crlf)), Ok(grid));
+    }
 }
