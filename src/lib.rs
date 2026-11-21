@@ -78,6 +78,11 @@
 
 extern crate alloc;
 
+/// Doctests for the code examples in README.md (not part of the API).
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+mod readme_doctests {}
+
 mod cbs;
 mod conflict;
 mod conflict_table;

@@ -1,5 +1,13 @@
 # mapf-search
 
+[![crates.io](https://img.shields.io/crates/v/mapf-search.svg)](https://crates.io/crates/mapf-search)
+[![docs.rs](https://img.shields.io/docsrs/mapf-search)](https://docs.rs/mapf-search)
+[![CI](https://github.com/sunsided/mapf-search/actions/workflows/ci.yml/badge.svg)](https://github.com/sunsided/mapf-search/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/sunsided/mapf-search/graph/badge.svg)](https://codecov.io/gh/sunsided/mapf-search)
+[![MSRV](https://img.shields.io/crates/msrv/mapf-search)](https://crates.io/crates/mapf-search)
+[![License](https://img.shields.io/crates/l/mapf-search)](https://github.com/sunsided/mapf-search#license)
+[![unsafe forbidden](https://img.shields.io/badge/unsafe-forbidden-success.svg)](https://github.com/rust-secure-code/safety-dance/)
+
 Multi-agent pathfinding: CBS, ECBS, CBS-TA, ICTS, PBS, M*, MO-CBS and MAPF-LNS2.
 
 ## Implemented
@@ -31,7 +39,37 @@ Multi-agent pathfinding: CBS, ECBS, CBS-TA, ICTS, PBS, M*, MO-CBS and MAPF-LNS2.
 ## Status
 
 Pre-release. Milestones 1 to 6 are drafted; the API will change. See
-[docs/design.md](docs/design.md).
+[docs/design.md](https://github.com/sunsided/mapf-search/blob/main/docs/design.md).
+
+## Usage
+
+```rust
+use mapf_search::{Agent, Grid, Instance, Limits, Objective, cbs, first_conflict};
+
+// Two agents swap the ends of a corridor that has one side pocket.
+let grid = Grid::parse(&["...", "@.@"]);
+let agents = vec![
+    Agent { start: grid.vertex(0, 0), goal: grid.vertex(2, 0) },
+    Agent { start: grid.vertex(2, 0), goal: grid.vertex(0, 0) },
+];
+let instance = Instance::new(grid, agents)?;
+
+let result = cbs(&instance, Objective::SumOfCosts, Limits::expansions(1_000));
+let solution = result.solution().expect("the pocket lets them pass");
+
+assert_eq!(first_conflict(&solution.paths), None);
+assert_eq!(solution.sum_of_costs, 7);
+# Ok::<(), mapf_search::InstanceError>(())
+```
+
+The crate is `no_std` and needs only `alloc`. The feature `multi-objective` adds MO-CBS
+over `multiobjective-search`.
+
+## MSRV
+
+Rust 1.85 (`rust-version` in `Cargo.toml`). The feature `multi-objective` needs Rust 1.86,
+the MSRV of `multiobjective-search`. The MSRV is a signal, not a contract: it may rise in a
+minor release.
 
 ## Breaking changes in this draft
 
@@ -64,7 +102,12 @@ Nothing is published yet, but code written against earlier states of this branch
 
 Licensed under either of
 
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
-- MIT license ([LICENSE-MIT](LICENSE-MIT))
+- Apache License, Version 2.0 ([LICENSE-APACHE](https://github.com/sunsided/mapf-search/blob/main/LICENSE-APACHE))
+- MIT license ([LICENSE-MIT](https://github.com/sunsided/mapf-search/blob/main/LICENSE-MIT))
 
 at your option.
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for
+inclusion in this work by you, as defined in the Apache-2.0 license, shall be dual licensed
+as above, without any additional terms or conditions. See
+[CONTRIBUTING.md](https://github.com/sunsided/mapf-search/blob/main/CONTRIBUTING.md).
