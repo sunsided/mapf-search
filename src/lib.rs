@@ -14,10 +14,10 @@
 //!   ([`CbsHeuristic`]), a conflict
 //!   avoidance table and disjoint [`Splitting`]; [`cbs_with`] and [`CbsConfig`] switch
 //!   them individually.
-//! - [`ecbs`]: enhanced CBS, bounded-suboptimal within a [`Weight`] `w`, with focal search
+//! - [`ecbs()`]: enhanced CBS, bounded-suboptimal within a [`Weight`] `w`, with focal search
 //!   at both levels.
-//! - [`icts`]: increasing cost tree search with pairwise pruning, optimal.
-//! - [`mstar`]: recursive M* with operator decomposition (subdimensional expansion),
+//! - [`icts()`]: increasing cost tree search with pairwise pruning, optimal.
+//! - [`mstar()`]: recursive M* with operator decomposition (subdimensional expansion),
 //!   optimal, and able to prove unsolvability; [`mstar_with`] and [`MStarConfig`] select
 //!   basic M*, recursive M* without operator decomposition, and OD-M*.
 //! - [`pbs()`]: priority-based search, fast but neither optimal nor complete.
