@@ -1,0 +1,19 @@
+# https://github.com/crate-ci/typos/blob/master/docs/reference.md
+[files]
+extend-exclude = [
+  "*.lock",
+  "fuzz/corpus/**",
+  "fuzz/artifacts/**",
+  "**/proptest-regressions/**",
+  "LICENSES/**",
+  "LICENSE-*",
+]
+
+[default]
+# Short commit hashes quoted in docs/design.md (`58ba6ec`), not words.
+extend-ignore-re = ["`[0-9a-f]{7,40}`"]
+
+[default.extend-words]
+# Project-specific words typos flags wrongly, e.g. `ser = "ser"`. Keep each entry justified.
+
+[default.extend-identifiers]
