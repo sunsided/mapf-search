@@ -242,6 +242,7 @@ fn render(grid: &Grid, symbols: &[(char, char)], crlf: bool) -> String {
                 free
             });
         }
+
         write!(text, "{end}").expect("writing to a String cannot fail");
     }
 

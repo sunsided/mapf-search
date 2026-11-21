@@ -41,13 +41,7 @@ fn parse(data: &[u8]) -> Option<(Objective, Instance<Grid>)> {
     let height = 1 + usize::from(height) % MAX_SIDE;
     let agents = 1 + usize::from(agents) % MAX_AGENTS;
     let cells = width * height;
-
-    let mut grid = Grid::new(width, height);
-    let blocked = u16::from_le_bytes([low, high]);
-    for vertex in (0..cells).filter(|&vertex| blocked >> vertex & 1 == 1) {
-        let (x, y) = grid.cell(vertex);
-        grid.block(x, y);
-    }
+    let grid = grid(width, height, u16::from_le_bytes([low, high]));
 
     let agents = rest
         .as_chunks::<2>()
@@ -61,6 +55,18 @@ fn parse(data: &[u8]) -> Option<(Objective, Instance<Grid>)> {
         .collect();
 
     Some((objective, Instance::new(grid, agents).ok()?))
+}
+
+/// A `width` by `height` grid (at most 16 cells) whose cell `v` is blocked if bit `v` of
+/// `blocked` is set.
+fn grid(width: usize, height: usize, blocked: u16) -> Grid {
+    let mut grid = Grid::new(width, height);
+    for vertex in (0..width * height).filter(|&vertex| blocked >> vertex & 1 == 1) {
+        let (x, y) = grid.cell(vertex);
+        grid.block(x, y);
+    }
+
+    grid
 }
 
 /// Asserts that `result`'s plan, if any, is valid for `instance`.

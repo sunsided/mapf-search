@@ -22,6 +22,7 @@ fn render(grid: &Grid) -> String {
             let blocked = grid.is_blocked(grid.vertex(x, y));
             text.push(if blocked { '@' } else { '.' });
         }
+
         writeln!(text).expect("writing to a String cannot fail");
     }
 

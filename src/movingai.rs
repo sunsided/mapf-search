@@ -50,24 +50,7 @@ pub fn parse_map(text: &str) -> Result<Grid, ParseError> {
 
     // Rows are checked before the grid is allocated, so a header cannot ask for more cells
     // than the text holds.
-    let rows = (0..height)
-        .map(|_| {
-            let (line, row) = lines.next().ok_or_else(|| {
-                ParseError::new(text.lines().count() + 1, ParseErrorKind::MissingRows)
-            })?;
-            check_map_row(width, line, row)?;
-
-            Ok(row)
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-
-    if let Some((line, _)) = lines.find(|(_, row)| !row.is_empty()) {
-        return Err(ParseError {
-            line,
-            kind: ParseErrorKind::ExtraRows,
-        });
-    }
-
+    let rows = read_map_rows(text, &mut lines, width, height)?;
     let mut grid = Grid::new(width, height);
     for (y, row) in rows.iter().enumerate() {
         block_map_row(&mut grid, y, row);
@@ -212,6 +195,33 @@ fn header_size(
     }
 
     Ok((width, height))
+}
+
+/// Reads the `height` rows of `width` cells that follow the header from `lines` (numbered
+/// lines of `text`), checks each with [`check_map_row`], and checks that only empty lines
+/// follow them. Allocates no more than the rows of `text` occupy.
+fn read_map_rows<'a>(
+    text: &str,
+    lines: &mut impl Iterator<Item = (usize, &'a str)>,
+    width: usize,
+    height: usize,
+) -> Result<Vec<&'a str>, ParseError> {
+    let rows = (0..height)
+        .map(|_| {
+            let (line, row) = lines.next().ok_or_else(|| {
+                ParseError::new(text.lines().count() + 1, ParseErrorKind::MissingRows)
+            })?;
+            check_map_row(width, line, row)?;
+
+            Ok(row)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    if let Some((line, _)) = lines.find(|(_, row)| !row.is_empty()) {
+        return Err(ParseError::new(line, ParseErrorKind::ExtraRows));
+    }
+
+    Ok(rows)
 }
 
 /// Checks that map row `row`, read from `line`, has `width` known cells.
