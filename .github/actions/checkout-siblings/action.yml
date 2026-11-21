@@ -17,13 +17,6 @@ inputs:
 runs:
   using: composite
   steps:
-    # Private: the low-level A* (dependency).
-    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      with:
-        repository: sunsided/heuristic-search
-        path: heuristic-search
-        token: ${{ inputs.token }}
-        persist-credentials: false
     # Private: the multi-objective low level of MO-CBS (optional dependency, feature
     # multi-objective; CI builds with --all-features).
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

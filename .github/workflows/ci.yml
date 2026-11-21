@@ -1,8 +1,8 @@
 # Keep in sync with `task ci` in the Taskfile. Job `name:`s are the required status checks.
 # Jobs that run cargo check this repository out into mapf-search/ and the unreleased
-# siblings heuristic-search and multiobjective-search next to it
-# (.github/actions/checkout-siblings): their path dependencies must resolve. That needs the
-# secret SIBLING_REPOS_TOKEN (read access to sunsided/heuristic-search and
+# sibling multiobjective-search next to it
+# (.github/actions/checkout-siblings): its path dependency must resolve. That needs the
+# secret SIBLING_REPOS_TOKEN (read access to
 # sunsided/multiobjective-search).
 # Actions are pinned to commit SHAs (tag in the comment); Dependabot updates them.
 name: CI

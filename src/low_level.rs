@@ -1,5 +1,5 @@
 //! The single-agent low level: space-time A* under a [`ConstraintSet`]
-//! ([`space_time_astar`]), run by `heuristic_search::astar` over `(vertex, time)` states.
+//! ([`space_time_astar`]), run by `heuristic_search::a_star` over `(vertex, time)` states.
 //!
 //! The time-expanded graph is infinite, so successors are cut at a horizon: after the
 //! constraints' [`latest_step`](ConstraintSet::latest_step) the agent moves on a fixed
@@ -23,7 +23,7 @@ mod landmarks;
 
 use alloc::vec::Vec;
 
-use heuristic_search::{Cost, Limits, Successors, astar, heuristic_fn};
+use heuristic_search::{Cost, Limits, Successors, a_star, heuristic_fn};
 use search_core::Lexicographic;
 
 use self::landmarks::Landmarks;
@@ -167,7 +167,7 @@ fn search<G: Graph, P: Pricing>(
         Some(P::estimate(direct.max(via)))
     });
 
-    let result = astar(&space, (agent.start, 0), &goal, heuristic, Limits::NONE);
+    let result = a_star(&space, (agent.start, 0), &goal, heuristic, Limits::NONE);
     let solution = result.into_solution()?;
 
     Some(

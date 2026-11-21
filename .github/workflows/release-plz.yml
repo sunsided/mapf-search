@@ -3,7 +3,7 @@
 # tag push starts publish-crates-io.yml, which publishes from the tag-restricted `crates-io` environment.
 # The App token matters: tags and PRs created with GITHUB_TOKEN would not trigger other workflows.
 # Dormant until the repository variable RELEASE_APP_CLIENT_ID is set; setting it activates releases.
-# The checkout lives in mapf-search/ with the unreleased siblings heuristic-search and
+# The checkout lives in mapf-search/ with the unreleased sibling
 # multiobjective-search next to it, as in ci.yml (.github/actions/checkout-siblings).
 name: Release-plz
 

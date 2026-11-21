@@ -1,9 +1,9 @@
 # Publishes mapf-search when release-plz pushes its vX.Y.Z tag.
 # Runs in the `crates-io` environment, which only allows v*.*.* tags.
 # crates.io trusted publishing is bound to this file name and environment: do not rename either.
-# Cargo jobs check out into mapf-search/ with the unreleased siblings heuristic-search and
+# Cargo jobs check out into mapf-search/ with the unreleased sibling
 # multiobjective-search next to it, as in ci.yml (.github/actions/checkout-siblings).
-# Publishing cannot succeed before both siblings have a real crates.io release: cargo publish
+# Publishing cannot succeed before that sibling has a real crates.io release: cargo publish
 # replaces the path dependencies with their crates.io versions, today 0.0.0 placeholders.
 # Actions are pinned to commit SHAs (tag in the comment); Dependabot updates them.
 name: Publish

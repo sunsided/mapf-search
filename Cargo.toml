@@ -25,16 +25,14 @@ exclude = [
 ]
 
 [dependencies]
-# Low-level A*. Path dependency on the unreleased sibling (a 0.0.0 placeholder on
-# crates.io); must become a crates.io version before this crate is published (see
-# docs/design.md). CI checks the sibling out next to this crate.
-heuristic-search = { path = "../heuristic-search", version = "0.0.0" }
+# Low-level A*.
+heuristic-search = "0.1"
 # The conflict-avoidance low level's `Lexicographic` cost. Must be the same version that
 # heuristic-search uses, so that its `Cost` trait is the one A* runs on. A crates.io
 # dependency; local development may patch it to a sibling checkout (CONTRIBUTING.md).
 search-core = "0.3"
-# Multi-objective low level of MO-CBS (NAMOA*dr, BOA*). Path dependency on the sibling
-# draft, like heuristic-search.
+# Multi-objective low level of MO-CBS (NAMOA*dr, BOA*). Path dependency on the
+# unreleased sibling; CI checks it out next to this crate.
 multiobjective-search = { path = "../multiobjective-search", version = "0.0.0", optional = true }
 
 [features]
