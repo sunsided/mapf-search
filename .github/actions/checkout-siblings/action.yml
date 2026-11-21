@@ -1,0 +1,34 @@
+# Checks out the unreleased sibling crates that path dependencies point at (`path = "../x"`)
+# next to this crate's checkout. Cargo fails on a missing path dependency even when it carries
+# a version. A local action cannot run before the checkout that contains it, so every job that
+# runs cargo first checks this repository out into `$GITHUB_WORKSPACE/mapf-search`, then uses
+# this action and sets `defaults.run.working-directory: mapf-search`.
+# Only siblings that are still 0.0.0 placeholders on crates.io belong here; released siblings
+# (search-core) are plain crates.io dependencies. Remove a sibling here once its dependency
+# moves to a crates.io release.
+name: Check out sibling repositories
+description: Checks out the unreleased sibling crates next to the mapf-search checkout
+
+inputs:
+  token:
+    description: Token with read access to the private sibling repositories (secret SIBLING_REPOS_TOKEN)
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # Private: the low-level A* (dependency).
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        repository: sunsided/heuristic-search
+        path: heuristic-search
+        token: ${{ inputs.token }}
+        persist-credentials: false
+    # Private: the multi-objective low level of MO-CBS (optional dependency, feature
+    # multi-objective; CI builds with --all-features).
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        repository: sunsided/multiobjective-search
+        path: multiobjective-search
+        token: ${{ inputs.token }}
+        persist-credentials: false
