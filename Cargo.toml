@@ -28,12 +28,10 @@ exclude = [
 # Low-level A*.
 heuristic-search = "0.2"
 # The conflict-avoidance low level's `Lexicographic` cost. Must be the same version that
-# heuristic-search uses, so that its `Cost` trait is the one A* runs on. A crates.io
-# dependency; local development may patch it to a sibling checkout (CONTRIBUTING.md).
+# heuristic-search uses, so that its `Cost` trait is the one A* runs on.
 search-core = "0.3"
-# Multi-objective low level of MO-CBS (NAMOA*dr, BOA*). Path dependency on the
-# unreleased sibling; CI checks it out next to this crate.
-multiobjective-search = { path = "../multiobjective-search", version = "0.0.0", optional = true }
+# Multi-objective low level of MO-CBS (NAMOA*dr, BOA*).
+multiobjective-search = { version = "0.1", optional = true }
 
 [features]
 ## Multi-objective CBS (`mo_cbs`, `mo_cbs_with`, `mo_cbs_per_agent`) over NAMOA*dr-st

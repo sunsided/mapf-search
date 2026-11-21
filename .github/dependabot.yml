@@ -5,9 +5,6 @@
 # zizmor config demands more. Add docker / npm blocks with the same settings if the repo grows them.
 version: 2
 updates:
-  # The cargo updates fail (path_dependencies_not_reachable) while heuristic-search and
-  # multiobjective-search are unreleased path dependencies; they work again once both are
-  # plain crates.io dependencies.
   - package-ecosystem: cargo
     directories: ["/", "/fuzz"]
     schedule:
@@ -23,8 +20,7 @@ updates:
         update-types: [minor, patch]
 
   - package-ecosystem: github-actions
-    # "/" covers the workflows; the local composite action needs its own entry.
-    directories: ["/", "/.github/actions/checkout-siblings"]
+    directory: /
     schedule:
       interval: weekly
     cooldown:

@@ -41,16 +41,15 @@ tasks:
         done
 
   fmt:
-    desc: Format the fuzz crate (separate workspace, not covered by the root cargo fmt)
+    desc: Format the fuzz crate (separate workspace, not covered by cargo fmt --all)
     cmds:
-      # No --all: from fuzz/ it would follow the path dependencies into the sibling checkouts.
-      - cargo fmt
+      - cargo fmt --all
 
   lint:
     desc: Format check and clippy for the fuzz crate
     preconditions: *nightly
     cmds:
-      - cargo fmt --check
+      - cargo fmt --all --check
       - cargo +nightly clippy --all-targets -- -D warnings
 
   clean:
