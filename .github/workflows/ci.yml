@@ -251,7 +251,9 @@ jobs:
           tool: cargo-hack
       # Library only: dev-dependencies (proptest 1.12 needs Rust 1.88) may need a newer Rust
       # than users do, so no --all-targets.
-      - run: cargo hack check --rust-version --workspace --ignore-private --all-features
+      # Default features only: multi-objective pulls in multiobjective-search, which needs Rust
+      # 1.86, above this crate's rust-version (1.85).
+      - run: cargo hack check --rust-version --workspace --ignore-private
 
   # Baseline: the published 0.0.0 placeholder on crates.io.
   semver:
