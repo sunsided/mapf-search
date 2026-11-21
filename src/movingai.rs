@@ -47,21 +47,30 @@ use crate::instance::{Agent, Instance, InstanceError};
 pub fn parse_map(text: &str) -> Result<Grid, ParseError> {
     let mut lines = numbered_lines(text);
     let (width, height) = parse_map_header(&mut lines)?;
-    let mut grid = Grid::new(width, height);
 
-    for y in 0..height {
-        let end = text.lines().count() + 1;
-        let (line, row) = lines
-            .next()
-            .ok_or(ParseError::new(end, ParseErrorKind::MissingRows))?;
-        parse_map_row(&mut grid, y, line, row)?;
-    }
+    // Rows are checked before the grid is allocated, so a header cannot ask for more cells
+    // than the text holds.
+    let rows = (0..height)
+        .map(|_| {
+            let (line, row) = lines.next().ok_or_else(|| {
+                ParseError::new(text.lines().count() + 1, ParseErrorKind::MissingRows)
+            })?;
+            check_map_row(width, line, row)?;
+
+            Ok(row)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
 
     if let Some((line, _)) = lines.find(|(_, row)| !row.is_empty()) {
         return Err(ParseError {
             line,
             kind: ParseErrorKind::ExtraRows,
         });
+    }
+
+    let mut grid = Grid::new(width, height);
+    for (y, row) in rows.iter().enumerate() {
+        block_map_row(&mut grid, y, row);
     }
 
     Ok(grid)
@@ -205,28 +214,47 @@ fn header_size(
     Ok((width, height))
 }
 
-/// Blocks the obstacles of map row `y`, read from `line`.
-fn parse_map_row(grid: &mut Grid, y: usize, line: usize, row: &str) -> Result<(), ParseError> {
+/// Checks that map row `row`, read from `line`, has `width` known cells.
+fn check_map_row(width: usize, line: usize, row: &str) -> Result<(), ParseError> {
     let found = row.chars().count();
-    if found != grid.width() {
+    if found != width {
         return Err(ParseError::new(
             line,
             ParseErrorKind::RowLength {
-                expected: grid.width(),
+                expected: width,
                 found,
             },
         ));
     }
 
-    for (x, cell) in row.chars().enumerate() {
-        match cell {
-            '.' | 'G' | 'S' => {}
-            '@' | 'O' | 'T' | 'W' => grid.block(x, y),
-            other => return Err(ParseError::new(line, ParseErrorKind::UnknownCell(other))),
-        }
+    match row
+        .chars()
+        .find(|cell| !is_free_cell(*cell) && !is_blocked_cell(*cell))
+    {
+        Some(other) => Err(ParseError::new(line, ParseErrorKind::UnknownCell(other))),
+        None => Ok(()),
     }
+}
 
-    Ok(())
+/// Blocks the obstacles of map row `y`, which [`check_map_row`] accepted.
+fn block_map_row(grid: &mut Grid, y: usize, row: &str) {
+    for (x, _) in row
+        .chars()
+        .enumerate()
+        .filter(|(_, cell)| is_blocked_cell(*cell))
+    {
+        grid.block(x, y);
+    }
+}
+
+/// Returns `true` for the free map cells `.`, `G` and `S`.
+fn is_free_cell(cell: char) -> bool {
+    matches!(cell, '.' | 'G' | 'S')
+}
+
+/// Returns `true` for the blocked map cells `@`, `O`, `T` and `W`.
+fn is_blocked_cell(cell: char) -> bool {
+    matches!(cell, '@' | 'O' | 'T' | 'W')
 }
 
 /// Parses one scenario entry from the text of line `line`.

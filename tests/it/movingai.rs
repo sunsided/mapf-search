@@ -139,6 +139,32 @@ fn map_errors_are_reported() {
     );
 }
 
+/// A header that declares far more cells than the text holds is rejected before the grid
+/// is allocated, instead of overflowing or exhausting memory.
+#[test]
+fn oversized_map_header_is_rejected() {
+    let side = usize::MAX / 2;
+    let text = format!("type octile\nheight {side}\nwidth {side}\nmap\n.\n");
+
+    assert_eq!(
+        parse_map(&text),
+        Err(ParseError {
+            line: 5,
+            kind: ParseErrorKind::RowLength {
+                expected: side,
+                found: 1
+            }
+        })
+    );
+    assert_eq!(
+        parse_map(&format!("type octile\nheight {side}\nwidth 1\nmap\n.\n")),
+        Err(ParseError {
+            line: 6,
+            kind: ParseErrorKind::MissingRows
+        })
+    );
+}
+
 /// Each malformed scenario is reported with its line and kind.
 #[test]
 fn scenario_errors_are_reported() {
