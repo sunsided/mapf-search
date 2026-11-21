@@ -10,7 +10,8 @@
 //! Positive constraints (disjoint splitting) are [`Landmarks`]: the heuristic also bounds
 //! the cost through the next required vertex, and prunes states too far from it.
 //!
-//! With a [`ConflictTable`] ([`plan_avoiding`]), the cost is [`Lexicographic`]: time steps
+//! With a [`ConflictTable`] ([`plan_avoiding`]), the cost is search-core's
+//! [`Lexicographic`]: time steps
 //! first, then conflicts with the other agents' paths, so the result is a cheapest path with
 //! the fewest conflicts among the cheapest (the conflict avoidance table of Sharon et al.
 //! 2015). The conflicts an agent causes by staying at its goal after it arrived
@@ -19,14 +20,13 @@
 //! level, which may take longer paths, does count them.)
 
 mod landmarks;
-mod lexicographic;
 
 use alloc::vec::Vec;
 
 use heuristic_search::{Cost, Limits, Successors, astar, heuristic_fn};
+use search_core::Lexicographic;
 
 use self::landmarks::Landmarks;
-use self::lexicographic::Lexicographic;
 use crate::conflict_table::ConflictTable;
 use crate::constraint::ConstraintSet;
 use crate::graph::{Graph, Vertex, distances_to};
@@ -127,16 +127,16 @@ impl Pricing for Plain {
 struct Avoiding<'a>(&'a ConflictTable);
 
 impl Pricing for Avoiding<'_> {
-    type Cost = Lexicographic;
+    type Cost = Lexicographic<u32, u32>;
 
-    fn step(self, from: Vertex, to: Vertex, time: Time) -> Lexicographic {
+    fn step(self, from: Vertex, to: Vertex, time: Time) -> Lexicographic<u32, u32> {
         Lexicographic {
             primary: 1,
             secondary: self.0.count(from, to, time),
         }
     }
 
-    fn estimate(steps: u32) -> Lexicographic {
+    fn estimate(steps: u32) -> Lexicographic<u32, u32> {
         Lexicographic {
             primary: steps,
             secondary: 0,

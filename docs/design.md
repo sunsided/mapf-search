@@ -253,8 +253,8 @@ A* wants (deeper, closer to the goal).
 **Conflict avoidance table** (`CbsConfig::conflict_avoidance`, on in `cbs`). Among the
 cheapest paths, prefer the one with the fewest conflicts with the other agents' current
 paths (Sharon et al. 2015). The conflict count accumulates along the path like a cost, so
-the low level runs A* over a local `Lexicographic` cost `(time steps, conflicts)`
-(`low_level/lexicographic.rs`) with edge cost `(1, conflicts of the move)` and heuristic
+the low level runs A* over search-core's `Lexicographic<u32, u32>` cost
+`(time steps, conflicts)` with edge cost `(1, conflicts of the move)` and heuristic
 `(h, 0)`; that heuristic stays consistent, so A* returns a cheapest path with the fewest
 conflicts among the cheapest. The counts come from `ConflictTable` (`conflict_table.rs`,
 shared with ECBS): vertex conflicts, swaps and agents parked at their goals. Conflicts the
@@ -784,11 +784,10 @@ lower bound on 4-connected grids. Moves stay 4-connected, as in the MAPF benchma
 
 ## Cross-crate needs
 
-None blocks the milestones done so far. The two API additions below belong in
-heuristic-search. The high level's focal list is local (see ECBS for why the upstream one
-does not fit it). The lexicographic cost is implemented locally too
-(`low_level/lexicographic.rs`, a `(u32, u32)` pair implementing `heuristic_search::Cost`);
-a generic `Lexicographic<A, B>` in search-core or heuristic-search would replace it.
+None blocks the milestones done so far. The high level's focal list is local (see ECBS
+for why the upstream one does not fit it). The lexicographic cost below is now
+search-core's `Lexicographic<P, S>` (search-core 0.2, API as of `ff12e3f`); this crate depends on
+search-core directly for it and dropped its local `low_level/lexicographic.rs`.
 
 Milestones 3 to 5 were developed against an export of heuristic-search's `b5cc485`,
 because its working tree was mid-change and did not compile at the time. The final checks
@@ -796,7 +795,7 @@ ran against the path dependency at `58ba6ec`. Disjoint splitting and DG/WDG were
 against an export of its `2d1f1ba` for the same reason; everything since was checked
 against the path dependency at `dbc85f8`.
 
-### Secondary tie-break: a lexicographic cost
+### Secondary tie-break: a lexicographic cost (done in search-core)
 
 CBS breaks low-level ties with a conflict avoidance table (CAT): among the cheapest paths,
 prefer the one with the fewest conflicts with other agents' current paths (Sharon et al.

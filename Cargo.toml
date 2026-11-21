@@ -15,6 +15,9 @@ categories = ["algorithms", "science::robotics", "no-std"]
 # Low-level A*. Path dependency on the sibling draft; must become a crates.io version
 # before this crate is published (see docs/design.md).
 heuristic-search = { path = "../heuristic-search", version = "0.0.0" }
+# The conflict-avoidance low level's `Lexicographic` cost. Must be the same version that
+# heuristic-search uses, so that its `Cost` trait is the one A* runs on.
+search-core = { path = "../search-core", version = "0.2" }
 # Multi-objective low level of MO-CBS (NAMOA*dr, BOA*). Path dependency on the sibling
 # draft, like heuristic-search.
 multiobjective-search = { path = "../multiobjective-search", version = "0.0.0", optional = true }
