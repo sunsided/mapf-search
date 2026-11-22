@@ -5,8 +5,8 @@ use std::hint::black_box;
 
 use criterion::Criterion;
 use mapf_search::{
-    Agent, CbsConfig, Grid, Instance, Limits, MStarConfig, MapfResult, Objective, Weight, cbs_with,
-    ecbs, icts, mstar_with, pbs,
+    Agent, CbsConfig, Grid, Instance, Limits, Lns2Config, MStarConfig, MapfResult, Objective,
+    Weight, cbs_with, ecbs, icts, lns2, mstar_with, pbs,
 };
 
 /// The benchmark instance: eight agents crossing an 8x8 map with a few walls.
@@ -38,7 +38,7 @@ fn main() {
     let instance = instance();
     let budget = || Limits::expansions(100_000);
     let soc = Objective::SumOfCosts;
-    let solvers: [(&str, &dyn Fn() -> MapfResult); 9] = [
+    let solvers: [(&str, &dyn Fn() -> MapfResult); 10] = [
         ("cbs plain", &|| {
             cbs_with(&instance, CbsConfig::plain(soc), budget())
         }),
@@ -49,6 +49,7 @@ fn main() {
             ecbs(&instance, soc, Weight::new(3, 2), budget())
         }),
         ("pbs", &|| pbs(&instance, soc, budget())),
+        ("lns2", &|| lns2(&instance, Lns2Config::default(), budget())),
         ("icts", &|| icts(&instance, soc, budget())),
         ("mstar basic", &|| {
             mstar_with(&instance, MStarConfig::basic(soc), budget())

@@ -2,7 +2,7 @@
 //! valid (each path runs from the agent's start to its goal, each step waits or moves to a
 //! neighbouring cell, moves run between free cells, and no two paths conflict), and the optimal solvers (CBS, ICTS and M*) must
 //! report the same cost whenever more than one of them solves the instance within its
-//! budget. Blocked cells are vertices without edges, so an agent whose start is its goal
+//! budget. ECBS, PBS and LNS2 must return valid plans. Blocked cells are vertices without edges, so an agent whose start is its goal
 //! may wait on a blocked cell. Instances stay at the scale of the property tests, so budgets stay small.
 
 #![no_main]
@@ -10,8 +10,8 @@
 
 use libfuzzer_sys::fuzz_target;
 use mapf_search::{
-    Agent, Grid, Instance, Limits, MapfResult, Objective, Weight, cbs, ecbs, first_conflict, icts,
-    mstar, pbs,
+    Agent, Grid, Instance, Limits, Lns2Config, MapfResult, Objective, Weight, cbs, ecbs,
+    first_conflict, icts, lns2, mstar, pbs,
 };
 
 /// The most columns and rows a fuzzed grid has.
@@ -132,4 +132,9 @@ fuzz_target!(|data: &[u8]| {
         "ecbs",
     );
     assert_valid(&instance, &pbs(&instance, objective, budget()), "pbs");
+    let config = Lns2Config {
+        seed: u64::from(data[0]),
+        ..Lns2Config::default()
+    };
+    assert_valid(&instance, &lns2(&instance, config, budget()), "lns2");
 });
