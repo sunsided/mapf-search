@@ -327,8 +327,8 @@ mod tests {
 
     use crate::graph::Grid;
     use crate::instance::{Agent, Instance};
-    use crate::lns2::random::Random;
     use crate::low_level::distance_tables;
+    use crate::random::Random;
 
     /// A repair of `instance` with neighborhoods of `size`, every agent on the straight path
     /// along its row, so that the two agents of each row collide.

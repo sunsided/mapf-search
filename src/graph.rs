@@ -26,6 +26,31 @@ pub trait Graph {
     fn neighbors(&self, vertex: Vertex, emit: impl FnMut(Vertex));
 }
 
+/// The direction an agent faces on an [`OrientedGraph`], below
+/// [`OrientedGraph::heading_count`].
+pub type Heading = usize;
+
+/// A [`Graph`] on which agents face a heading and only move forward, for solvers that model
+/// turning in place as taking time ([`pibt_turns`](crate::pibt_turns())).
+///
+/// Each step an agent either moves to [`OrientedGraph::forward`] of its vertex and heading,
+/// keeping the heading, or turns in place to one of [`OrientedGraph::turns`], or waits.
+/// The out-neighbours of a vertex in [`Graph::neighbors`] must be exactly the vertices
+/// some heading moves forward to, so that a vertex path alone still describes where an
+/// agent is; a turn is a wait in it.
+pub trait OrientedGraph: Graph {
+    /// The number of headings. Headings are `0..heading_count()`, the same at every vertex.
+    fn heading_count(&self) -> usize;
+
+    /// The vertex an agent at `vertex` facing `heading` reaches by moving forward, or
+    /// `None` if there is no edge that way.
+    fn forward(&self, vertex: Vertex, heading: Heading) -> Option<Vertex>;
+
+    /// Calls `emit` once for every heading one turn away from `heading`. Turning must be
+    /// able to reach every heading from every other.
+    fn turns(&self, heading: Heading, emit: impl FnMut(Heading));
+}
+
 /// A graph stored as one list of out-neighbours per vertex.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct AdjacencyList {

@@ -4,16 +4,19 @@
 //! report the same cost whenever more than one of them solves the instance within its
 //! budget. CBS-TA runs on the same agents with every agent's goal as a candidate of every
 //! agent: its plan must end each agent at a distinct one, and cost no more than CBS's. ECBS,
-//! PBS, LNS2 and PIBT must return valid plans. Blocked cells are vertices without edges, so an agent whose start is its goal
+//! PBS, LNS2 and PIBT must return valid plans, and PIBT*_T (headings from the input) valid
+//! plans whose every step waits, turns a quarter, or moves forward. Blocked cells are vertices without edges, so an agent whose start is its goal
 //! may wait on a blocked cell. Instances stay at the scale of the property tests, so budgets stay small.
 
 #![no_main]
 #![forbid(unsafe_code)]
 
 use libfuzzer_sys::fuzz_target;
+use mapf_search::OrientedGraph as _;
 use mapf_search::{
-    Agent, Grid, Instance, Limits, Lns2Config, MapfResult, Objective, TaskAgent, TaskInstance,
-    Weight, cbs, cbs_ta, ecbs, epea, first_conflict, icts, lns2, mstar, pbs, pibt,
+    Agent, Grid, Heading, Instance, Limits, Lns2Config, MapfResult, Objective, TaskAgent,
+    TaskInstance, Weight, cbs, cbs_ta, ecbs, epea, first_conflict, icts, lns2, mstar, pbs, pibt,
+    pibt_turns,
 };
 
 /// The most columns and rows a fuzzed grid has.
@@ -142,6 +145,38 @@ fn check_task_assignment(instance: &Instance<Grid>, objective: Objective, cbs: &
     }
 }
 
+/// Runs PIBT*_T with headings taken from `data` and checks its plan, if any: each step
+/// waits, turns a quarter, or moves forward without turning, and no two agents conflict.
+fn check_turns(instance: &Instance<Grid>, data: &[u8]) {
+    let headings: Vec<Heading> = (0..instance.agents().len())
+        .map(|agent| usize::from(data.get(agent).copied().unwrap_or(0)) % 4)
+        .collect();
+    let run = pibt_turns(
+        instance,
+        &headings,
+        u64::from(data[0]),
+        Limits::expansions(BUDGET),
+    );
+    let Some(solution) = run.result.solution() else {
+        return;
+    };
+
+    assert_valid(instance, &run.result, "pibt_turns");
+    for (path, turns) in solution.paths.iter().zip(&run.headings) {
+        assert_eq!(path.len(), turns.len(), "pibt_turns: lengths");
+        for t in 1..path.len() {
+            if path[t] == path[t - 1] {
+                let quarter = (turns[t] + 4 - turns[t - 1]) % 4;
+                assert!(quarter != 2, "pibt_turns: half turn in one step");
+            } else {
+                assert_eq!(turns[t], turns[t - 1], "pibt_turns: turned while moving");
+                let forward = instance.graph().forward(path[t - 1], turns[t - 1]);
+                assert_eq!(forward, Some(path[t]), "pibt_turns: not forward");
+            }
+        }
+    }
+}
+
 fuzz_target!(|data: &[u8]| {
     let Some((objective, instance)) = parse(data) else {
         return;
@@ -168,6 +203,7 @@ fuzz_target!(|data: &[u8]| {
     }
 
     check_task_assignment(&instance, objective, &optimal[0].1);
+    check_turns(&instance, data);
 
     let weight = Weight::new(3, 2);
     assert_valid(

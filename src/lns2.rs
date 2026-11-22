@@ -33,7 +33,6 @@
 #[cfg(test)]
 mod low_level;
 mod neighborhood;
-mod random;
 mod sipps;
 
 use alloc::vec;
@@ -42,13 +41,13 @@ use alloc::vec::Vec;
 use heuristic_search::{Budget, Stats};
 
 use self::neighborhood::Method;
-use self::random::Random;
 use self::sipps::{Obstacles, sipps};
 use crate::conflict::conflicts;
 use crate::graph::Graph;
 use crate::instance::{AgentId, Instance};
 use crate::low_level::distance_tables;
 use crate::path::Path;
+use crate::random::Random;
 use crate::solution::{MapfResult, Outcome, Solution};
 
 /// How fast the adaptive weights follow recent success: the paper's reaction factor `γ`.

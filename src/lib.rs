@@ -29,20 +29,23 @@
 //!   a few agents at a time; seeded ([`Lns2Config`]), neither optimal nor complete.
 //! - [`pibt()`]: priority inheritance with backtracking, one time step for all agents at a
 //!   time; very fast, neither optimal nor complete.
+//! - [`pibt_turns()`]: PIBT*_T, PIBT for agents that face a heading, move only forward and
+//!   need time to turn, on any [`OrientedGraph`] such as a [`Grid`] ([`TurnResult`]).
 //! - [`pbs()`]: priority-based search, fast but neither optimal nor complete.
 //! - `mo_cbs`, `mo_cbs_with` and `mo_cbs_per_agent`, with the `multi-objective` feature:
 //!   multi-objective CBS (MO-CBS and MO-CBS-t, over BOA* or NAMOA*dr), every
 //!   Pareto-optimal plan when moves and waits cost vectors, shared or per agent, with an
 //!   opt-in feasibility check, conflict prioritization, bypass and disjoint splitting.
 //!
-//! Every solver but [`lns2()`] and [`pibt()`], which only seek a feasible plan, takes an
-//! [`Objective`]: sum of costs or makespan.
+//! Every solver but [`lns2()`], [`pibt()`] and [`pibt_turns()`], which only seek a feasible
+//! plan, takes an [`Objective`]: sum of costs or makespan.
 //! - [`space_time_astar`]: the single-agent low level under [`Constraint`]s, built on the
 //!   `heuristic-search` crate's A*.
 //! - [`first_conflict`] and [`conflicts`]: conflict detection on any set of paths.
 //! - [`parse_map`], [`parse_scenario`] and [`scenario_instance`]: Moving AI benchmarks.
 //!
-//! Every solver returns a [`MapfResult`]: an [`Outcome`] (with a [`Solution`] if solved)
+//! Every solver returns a [`MapfResult`] ([`pibt_turns()`] inside a [`TurnResult`] with the
+//! headings): an [`Outcome`] (with a [`Solution`] if solved)
 //! and high-level [`Stats`]. [`Budget`], [`Limits`] and [`Stats`] are re-exported from
 //! `heuristic-search`; they bound and count the high-level expansions. [`Weight`] is too.
 //!
@@ -102,6 +105,8 @@ mod mstar;
 mod path;
 mod pbs;
 mod pibt;
+mod pibt_turns;
+mod random;
 mod solution;
 
 pub use cbs::{CbsConfig, CbsHeuristic, Splitting, cbs, cbs_ta, cbs_ta_with, cbs_with};
@@ -109,7 +114,7 @@ pub use conflict::{Conflict, conflicts, first_conflict};
 pub use constraint::{Constraint, ConstraintSet};
 pub use ecbs::ecbs;
 pub use epea::epea;
-pub use graph::{AdjacencyList, Graph, Grid, Vertex};
+pub use graph::{AdjacencyList, Graph, Grid, Heading, OrientedGraph, Vertex};
 pub use heuristic_search::{Budget, Limits, Stats, Weight};
 pub use icts::icts;
 pub use instance::{Agent, AgentId, Instance, InstanceError, TaskAgent, TaskInstance};
@@ -128,4 +133,5 @@ pub use mstar::{MStarConfig, mstar, mstar_with};
 pub use path::{Objective, Path, Time, makespan, path_cost, position_at, sum_of_costs};
 pub use pbs::pbs;
 pub use pibt::pibt;
+pub use pibt_turns::{TurnResult, pibt_turns};
 pub use solution::{MapfResult, Outcome, Solution};

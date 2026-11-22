@@ -3,7 +3,7 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
-use super::{Graph, Vertex};
+use super::{Graph, Heading, OrientedGraph, Vertex};
 
 /// A rectangular 4-connected grid. Cells are vertices in row-major order,
 /// `y * width + x`; blocked cells are vertices without edges.
@@ -108,6 +108,67 @@ impl Grid {
     #[must_use]
     pub fn is_blocked(&self, vertex: Vertex) -> bool {
         self.blocked[vertex]
+    }
+}
+
+impl Grid {
+    /// The heading towards larger `x`.
+    pub const EAST: Heading = 0;
+    /// The heading towards smaller `y`, the row above.
+    pub const NORTH: Heading = 1;
+    /// The heading towards smaller `x`.
+    pub const WEST: Heading = 2;
+    /// The heading towards larger `y`, the row below.
+    pub const SOUTH: Heading = 3;
+}
+
+/// A grid as an [`OrientedGraph`]: four headings ([`Grid::EAST`], [`Grid::NORTH`],
+/// [`Grid::WEST`], [`Grid::SOUTH`], counter-clockwise), and a turn is a quarter turn either
+/// way, counter-clockwise first.
+///
+/// # Examples
+///
+/// ```
+/// use mapf_search::{Grid, OrientedGraph};
+///
+/// let grid = Grid::parse(&["..", "@."]);
+/// assert_eq!(grid.forward(grid.vertex(0, 0), Grid::EAST), Some(grid.vertex(1, 0)));
+/// assert_eq!(grid.forward(grid.vertex(0, 0), Grid::SOUTH), None);
+///
+/// let mut turns = Vec::new();
+/// grid.turns(Grid::EAST, |heading| turns.push(heading));
+/// assert_eq!(turns, [Grid::NORTH, Grid::SOUTH]);
+/// ```
+impl OrientedGraph for Grid {
+    fn heading_count(&self) -> usize {
+        4
+    }
+
+    fn forward(&self, vertex: Vertex, heading: Heading) -> Option<Vertex> {
+        if self.is_blocked(vertex) {
+            return None;
+        }
+
+        let (x, y) = self.cell(vertex);
+        let (nx, ny) = match heading {
+            Self::EAST => (x + 1, y),
+            Self::NORTH => (x, y.checked_sub(1)?),
+            Self::WEST => (x.checked_sub(1)?, y),
+            Self::SOUTH => (x, y + 1),
+            _ => return None,
+        };
+        if nx >= self.width || ny >= self.height {
+            return None;
+        }
+
+        let next = self.vertex(nx, ny);
+
+        (!self.is_blocked(next)).then_some(next)
+    }
+
+    fn turns(&self, heading: Heading, mut emit: impl FnMut(Heading)) {
+        emit((heading + 1) % 4);
+        emit((heading + 3) % 4);
     }
 }
 
