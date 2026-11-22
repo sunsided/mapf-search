@@ -5,8 +5,9 @@
 //!
 //! A swap is *required* if pushing would only drive the other agent down a corridor
 //! towards which the pusher itself is heading, and the two want to cross. It is *possible*
-//! if, walking down the corridor from the other agent away from the pusher, a vertex with
-//! room to step aside (two or more ways on) comes before a dead end. Vertices with one
+//! if, with the roles reversed, the pusher can back off: walking down the corridor from
+//! the pusher away from the other agent, a vertex with room to step aside (two or more
+//! ways on) comes before a dead end. Vertices with one
 //! neighbour that hold an agent at its goal count as walls.
 
 use super::Run;
@@ -24,11 +25,13 @@ impl<G: OrientedGraph> Run<'_, G> {
             return None;
         }
 
+        // `agent` would push the occupant of `first` down a corridor; the swap needs room
+        // for `agent` itself to back off from `first` once it pulls the other through.
         if let Some(other) = self.occupant[first] {
             let undecided = self.claim[other].is_none() && self.decided[other].is_none();
             if undecided
                 && self.swap_required(agent, other, here, first)
-                && self.swap_possible(first, here)
+                && self.room_to_back_off(first, here)
             {
                 return Some(other);
             }
@@ -38,11 +41,14 @@ impl<G: OrientedGraph> Run<'_, G> {
         self.instance
             .graph()
             .neighbors(here, |next| neighbors.push(next));
+        // The clear operation of push and swap: a neighbour behind `agent` wants through. It
+        // is judged as if it stood at `here` and pushed `agent` on into `first`, not from its
+        // own vertex, as in PIBT+ and LaCAM.
         neighbors.into_iter().find_map(|vertex| {
             let other = self.occupant[vertex]?;
             let wants_through = vertex != first
                 && self.swap_required(other, agent, here, first)
-                && self.swap_possible(first, here);
+                && self.room_to_back_off(first, here);
 
             wants_through.then_some(other)
         })
@@ -80,13 +86,15 @@ impl<G: OrientedGraph> Run<'_, G> {
         crosses && pusher_done_or_closer
     }
 
-    /// Returns `true` if walking down the corridor from `puller_at`, away from
-    /// `pusher_at`, reaches a vertex with room to step aside before a dead end.
-    fn swap_possible(&self, pusher_at: Vertex, puller_at: Vertex) -> bool {
-        let (mut behind, mut ahead) = (pusher_at, puller_at);
+    /// Returns `true` if walking down the corridor from `start`, away from `away_from`,
+    /// reaches a vertex with room to step aside before a dead end or a return to
+    /// `away_from`. The swap rules call it with the pusher's vertex as `start`: the roles
+    /// of the required-test are reversed (the paper's stage 2).
+    fn room_to_back_off(&self, away_from: Vertex, start: Vertex) -> bool {
+        let (mut behind, mut ahead) = (away_from, start);
 
         for _ in 0..self.instance.graph().vertex_count() {
-            if ahead == pusher_at {
+            if ahead == away_from {
                 return false;
             }
 

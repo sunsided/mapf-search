@@ -472,7 +472,9 @@ conflicts and costs are checked as for any plan) and each agent's heading per st
 - **Swaps** (`pibt_turns/swap.rs`): the PIBT+/LaCAM rule on heading-free distances (the
   least over headings), as in the reference code: required if pushing only drives the
   other agent down a corridor the pusher is heading along and the two want to cross,
-  possible if the corridor reaches room to step aside before a dead end. The pusher then
+  possible if, with the roles reversed, the pusher can back off down its corridor to room
+  to step aside before a dead end. A neighbour behind the agent that wants through (the
+  clear operation of push and swap) is judged as if it stood at the agent's vertex. The pusher then
   reverses its preferences and pulls the other agent into its vertex (turning it first if
   needed), unless the pusher stays. Corridor walks are capped at the vertex count, since
   on directed graphs they need not return.
