@@ -20,7 +20,7 @@ use search_core::Lexicographic;
 use crate::conflict_table::ConflictTable;
 use crate::graph::{Graph, Vertex};
 use crate::instance::Agent;
-use crate::path::{Path, Time};
+use crate::path::{Path, Time, trim_trailing_waits};
 
 /// A search state: a vertex, the time the agent is there, and whether it has finished at
 /// its goal for good.
@@ -73,9 +73,7 @@ pub(super) fn fewest_collisions<G: Graph>(
         .filter(|&(_, _, finished)| !finished)
         .map(|(vertex, _, _)| vertex)
         .collect();
-    while path.len() > 1 && path[path.len() - 2] == path[path.len() - 1] {
-        path.pop();
-    }
+    trim_trailing_waits(&mut path);
 
     Some(path)
 }

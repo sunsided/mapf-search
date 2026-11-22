@@ -47,19 +47,18 @@ impl Landmarks {
         let goal = to_goal.iter().position(|&d| d == Some(0));
         let required: Vec<(Time, Vertex)> = constraints.landmarks().collect();
         let mut chain: Vec<Landmark> = Vec::with_capacity(required.len());
-        let mut later: Option<(Time, Vertex)> = None;
         for &(time, vertex) in required.iter().rev() {
             let distances = distances_to(graph, vertex);
             let mut rest = to_goal[vertex]?.max(earliest_finish.saturating_sub(time));
-            if let Some((next_time, next_vertex)) = later {
-                let gap = next_time - time;
-                if distances_to(graph, next_vertex)[vertex]? > gap {
+            // The chain is built backwards, so its last landmark is the next one in time.
+            if let Some(next) = chain.last() {
+                let gap = next.time - time;
+                if next.distances[vertex]? > gap {
                     return None;
                 }
 
-                let next_rest = chain.last().expect("the later landmark").rest;
-                if next_rest > 0 {
-                    rest = rest.max(gap + next_rest);
+                if next.rest > 0 {
+                    rest = rest.max(gap + next.rest);
                 }
             }
 
@@ -72,7 +71,6 @@ impl Landmarks {
                 distances,
                 rest,
             });
-            later = Some((time, vertex));
         }
 
         chain.reverse();

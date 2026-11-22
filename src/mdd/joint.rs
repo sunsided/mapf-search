@@ -9,7 +9,7 @@ use alloc::vec::Vec;
 
 use crate::graph::Vertex;
 use crate::mdd::Mdd;
-use crate::path::{Path, Time};
+use crate::path::{Path, Time, trim_trailing_waits};
 
 /// One path per MDD in `mdds`, each from its MDD, that together have no vertex conflict and
 /// no swap, or `None` if no such combination exists. The paths end at their goals without
@@ -57,12 +57,8 @@ impl Search<'_> {
         }
 
         let current = self.trail.last().expect("just pushed").clone();
-        let mut successors = Vec::new();
-        self.combine(time, &current, &mut Vec::new(), &mut successors);
-        for next in successors {
-            if self.reach_goal(time + 1, next) {
-                return true;
-            }
+        if self.descend(time, &current, &mut Vec::with_capacity(current.len())) {
+            return true;
         }
 
         self.trail.pop();
@@ -70,28 +66,33 @@ impl Search<'_> {
         false
     }
 
-    /// Extends the partial joint step `picked` agent by agent and collects every
-    /// conflict-free completion from `nodes` at `time` into `out`.
-    fn combine(
-        &self,
-        time: Time,
-        nodes: &[usize],
-        picked: &mut Vec<usize>,
-        out: &mut Vec<Vec<usize>>,
-    ) {
+    /// Extends the partial joint step `picked` agent by agent from `nodes` at `time`, and
+    /// searches on from each conflict-free completion as soon as it is complete. Returns
+    /// `true` once one reaches the goal.
+    ///
+    /// Completions are never collected: their number is the product of the agents'
+    /// branching, while this keeps one partial step per level.
+    fn descend(&mut self, time: Time, nodes: &[usize], picked: &mut Vec<usize>) -> bool {
         let agent = picked.len();
         if agent == self.mdds.len() {
-            out.push(picked.clone());
-            return;
+            return self.reach_goal(time + 1, picked.clone());
         }
 
-        for &child in self.mdds[agent].children(time, nodes[agent]) {
-            if !self.collides(time, nodes, picked, child) {
-                picked.push(child);
-                self.combine(time, nodes, picked, out);
-                picked.pop();
+        let mdds = self.mdds;
+        for &child in mdds[agent].children(time, nodes[agent]) {
+            if self.collides(time, nodes, picked, child) {
+                continue;
             }
+
+            picked.push(child);
+            if self.descend(time, nodes, picked) {
+                return true;
+            }
+
+            picked.pop();
         }
+
+        false
     }
 
     /// Returns `true` if agent `picked.len()` moving to node `child` collides with an agent
@@ -124,9 +125,7 @@ impl Search<'_> {
                     .zip(&self.trail)
                     .map(|(time, nodes)| self.vertex(agent, time, nodes[agent]))
                     .collect();
-                while path.len() > 1 && path[path.len() - 2] == path[path.len() - 1] {
-                    path.pop();
-                }
+                trim_trailing_waits(&mut path);
 
                 path
             })

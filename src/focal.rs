@@ -20,7 +20,8 @@ use alloc::collections::{BTreeMap, BTreeSet};
 
 use heuristic_search::Weight;
 
-/// A handle to an item in a [`FocalList`], for [`FocalList::remove`]. Unique per list.
+/// The key of an item in a [`FocalList`]: its push order. Unique per list, and the final
+/// tie breaker of every order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct Handle(u64);
 
@@ -63,7 +64,7 @@ impl<S: Ord + Copy, T> FocalList<S, T> {
 
     /// Adds `item` with admissible lower bound `f`, focal value `value` (at least `f`) and
     /// secondary key `secondary`.
-    pub(crate) fn push(&mut self, f: u32, value: u32, secondary: S, item: T) -> Handle {
+    pub(crate) fn push(&mut self, f: u32, value: u32, secondary: S, item: T) {
         debug_assert!(
             f <= value,
             "the value of an item is at least its lower bound"
@@ -86,12 +87,10 @@ impl<S: Ord + Copy, T> FocalList<S, T> {
                 payload: item,
             },
         );
-
-        handle
     }
 
     /// Removes the item of `handle`, if it is still in the list.
-    pub(crate) fn remove(&mut self, handle: Handle) -> Option<T> {
+    fn remove(&mut self, handle: Handle) -> Option<T> {
         let item = self.items.remove(&handle)?;
         self.open.remove(&(item.f, handle));
         self.values.remove(&(item.value, handle));
@@ -178,8 +177,8 @@ mod tests {
     }
 
     /// Pushes `item` with value equal to `f`, as a single-agent search does.
-    fn push(list: &mut FocalList<u32, char>, f: u32, secondary: u32, item: char) -> Handle {
-        list.push(f, f, secondary, item)
+    fn push(list: &mut FocalList<u32, char>, f: u32, secondary: u32, item: char) {
+        list.push(f, f, secondary, item);
     }
 
     /// With weight 1, the list pops by `f`, ties by secondary key.
@@ -207,21 +206,19 @@ mod tests {
         assert_eq!(list.pop(), None);
     }
 
-    /// Removing the `f_min` item can shrink the focal sublist again.
+    /// A push below `f_min` lowers the bound, and items above the new bound leave the
+    /// focal sublist even if their secondary key is better.
     #[test]
-    fn removal_and_falling_bounds() {
+    fn falling_bound_shrinks_focal() {
         let mut list = FocalList::new(Weight::new(3, 2));
-        let low = push(&mut list, 2, 9, 'a');
-        push(&mut list, 3, 0, 'b');
-        push(&mut list, 10, 0, 'c');
+        push(&mut list, 4, 1, 'a');
+        push(&mut list, 6, 0, 'b');
+        assert_eq!(list.pop(), Some(('b', 4)));
 
-        assert_eq!(list.pop(), Some(('b', 2)));
-        assert_eq!(list.remove(low), Some('a'));
-        assert_eq!(list.remove(low), None);
-
-        push(&mut list, 4, 0, 'd');
-        assert_eq!(list.pop(), Some(('d', 4)));
-        assert_eq!(list.pop(), Some(('c', 10)));
+        push(&mut list, 2, 5, 'c');
+        assert_eq!(list.pop(), Some(('c', 2)));
+        assert_eq!(list.pop(), Some(('a', 4)));
+        assert_eq!(list.pop(), None);
     }
 
     /// ECBS's high level: lower bound `f`, focal membership by the larger cost.

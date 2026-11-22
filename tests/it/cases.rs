@@ -5,10 +5,30 @@ use heuristic_search::Limits;
 use mapf_search::{
     AdjacencyList, Agent, CbsConfig, CbsHeuristic, Conflict, Constraint, ConstraintSet, Grid,
     Instance, InstanceError, MStarConfig, Objective, Outcome, Splitting, cbs, cbs_with, conflicts,
-    first_conflict, mstar_with, space_time_astar,
+    first_conflict, icts, mstar_with, space_time_astar,
 };
 
 use crate::oracle::{assert_valid_plan, optimal_cost};
+
+/// ICTS's joint MDD search descends into one joint step at a time: forty agents that never
+/// meet, each with two shortest paths, solve at once. Collecting every joint step first
+/// would need `2^40` of them.
+#[test]
+fn icts_handles_many_independent_agents() {
+    let count = 40;
+    let grid = Grid::new(3 * count + 2, 3);
+    let agents = (0..count)
+        .map(|i| Agent {
+            start: grid.vertex(3 * i, 0),
+            goal: grid.vertex(3 * i + 1, 1),
+        })
+        .collect();
+    let instance = Instance::new(grid, agents).expect("distinct starts and goals");
+
+    let result = icts(&instance, Objective::SumOfCosts, Limits::expansions(10));
+
+    assert_eq!(result.solution().map(|s| s.sum_of_costs), Some(80));
+}
 
 /// Two agents swapping along an edge is a conflict, reported for the first agent's move.
 #[test]

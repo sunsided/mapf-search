@@ -196,17 +196,19 @@ impl<G: Graph> Search<'_, G> {
         }
     }
 
-    /// Flow-conflict branching: one child of `parent` per blocker that can be released, each
-    /// forbidding the blocker to its agent. Blockers at step 0 (fixed by the starts) and
-    /// those the node already forbids are skipped; without any other, the node is dropped.
+    /// Flow-conflict branching: one child of `parent` per blocker, each forbidding the
+    /// blocker to its agent; without any child, the node is dropped.
+    ///
+    /// Every blocker is a reservation of a path of `parent`, which satisfies its
+    /// constraints, so none is forbidden already.
     pub(super) fn expand_blockers(&mut self, parent: &Node, blockers: &[Blocker]) {
         self.stats.expanded += 1;
 
-        for constraint in blockers.iter().filter_map(|&blocker| releasable(blocker)) {
-            if parent.constraints.contains(&constraint) {
-                continue;
-            }
-
+        for constraint in blockers.iter().map(|&blocker| releasing(blocker)) {
+            debug_assert!(
+                !parent.constraints.contains(&constraint),
+                "a blocker is a reservation the node allows"
+            );
             if let Some(child) = self.child(parent, constraint) {
                 self.push(child.node);
             }
@@ -214,31 +216,35 @@ impl<G: Graph> Search<'_, G> {
     }
 }
 
-/// The constraint that releases `blocker`; `None` for a vertex blocker at step 0, which the
-/// starts fix.
-fn releasable(blocker: Blocker) -> Option<Constraint> {
+/// The constraint that releases `blocker`.
+///
+/// Never a vertex at step 0: the only arcs into the first layer leave the source towards
+/// the unassigned starts, which no path holds, so no cut separates a fixed start.
+fn releasing(blocker: Blocker) -> Constraint {
     match blocker {
-        Blocker::Vertex { time: 0, .. } => None,
         Blocker::Vertex {
             agent,
             vertex,
             time,
-        } => Some(Constraint::Vertex {
-            agent,
-            vertex,
-            time,
-        }),
+        } => {
+            debug_assert!(time > 0, "the starts are never cut");
+            Constraint::Vertex {
+                agent,
+                vertex,
+                time,
+            }
+        }
         Blocker::Move {
             agent,
             from,
             to,
             time,
-        } => Some(Constraint::Edge {
+        } => Constraint::Edge {
             agent,
             from,
             to,
             time,
-        }),
+        },
     }
 }
 
@@ -262,6 +268,11 @@ mod tests {
 
     /// The expansion budget of the runs in these tests.
     const BUDGET: u64 = 5_000;
+
+    /// The expansion budget on instances the joint search proves unsolvable. On those FOCBS
+    /// can only run into its budget, and each expansion routes a flow, so the full budget
+    /// made the property test take minutes. As in the integration tests' property tests.
+    const UNSOLVABLE_BUDGET: u64 = 60;
 
     /// A joint state: each assigned agent's vertex and finished flag, then each unassigned
     /// agent's vertex.
@@ -466,7 +477,8 @@ mod tests {
             let soc = Objective::SumOfCosts;
             let config = if improved { CbsConfig::improved(soc) } else { CbsConfig::plain(soc) };
             let expected = optimal_sst(&instance);
-            let result = focbs_with(&instance, config, Limits::expansions(BUDGET));
+            let budget = if expected.is_some() { BUDGET } else { UNSOLVABLE_BUDGET };
+            let result = focbs_with(&instance, config, Limits::expansions(budget));
 
             match (&result.outcome, expected) {
                 (UaOutcome::Solved(solution), Some(cost)) => {

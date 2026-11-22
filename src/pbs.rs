@@ -32,7 +32,7 @@ use crate::constraint::{Constraint, ConstraintSet};
 use crate::graph::{Graph, Vertex};
 use crate::instance::{AgentId, Instance};
 use crate::low_level::{distance_tables, plan};
-use crate::path::{Objective, Path, Time, makespan, sum_of_costs};
+use crate::path::{Objective, Path, Reservation, makespan, reservations, sum_of_costs};
 use crate::solution::{MapfResult, Outcome, Solution};
 
 /// Finds a conflict-free plan with priority-based search, aiming at a low `objective`
@@ -248,27 +248,22 @@ fn below_or_equal(higher: &[BTreeSet<AgentId>], low: AgentId) -> Vec<AgentId> {
 /// Adds to `constraints` (for `agent`) what keeps it out of the way of `path`: its vertex
 /// at every time, the reverse of each of its moves, and its last vertex from its arrival on.
 fn avoid(constraints: &mut ConstraintSet, agent: AgentId, path: &[Vertex]) {
-    let last = path.len() - 1;
-    let time = |index: usize| Time::try_from(index).expect("path lengths fit in u32");
-
-    for (index, &vertex) in path[..last].iter().enumerate() {
-        constraints.insert(&Constraint::Vertex {
-            agent,
-            vertex,
-            time: time(index),
-        });
-    }
-
-    for (index, step) in path.windows(2).enumerate() {
-        if step[0] != step[1] {
-            constraints.insert(&Constraint::Edge {
+    for reservation in reservations(path) {
+        match reservation {
+            Reservation::Visit { vertex, time } => {
+                constraints.insert(&Constraint::Vertex {
+                    agent,
+                    vertex,
+                    time,
+                });
+            }
+            Reservation::Move { from, to, time } => constraints.insert(&Constraint::Edge {
                 agent,
-                from: step[1],
-                to: step[0],
-                time: time(index),
-            });
+                from: to,
+                to: from,
+                time,
+            }),
+            Reservation::Park { vertex, time } => constraints.block_from(vertex, time),
         }
     }
-
-    constraints.block_from(path[last], time(last));
 }

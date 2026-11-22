@@ -228,8 +228,6 @@ impl<'a, G: Graph, F> SpaceTime<'a, G, F> {
         constraints: &'a ConstraintSet,
         interrupt: Interrupt<'a>,
     ) -> Self {
-        let vertices = Time::try_from(graph.vertex_count()).unwrap_or(Time::MAX);
-
         Self {
             interrupt: RefCell::new(interrupt),
             expansions: Cell::new(0),
@@ -237,10 +235,8 @@ impl<'a, G: Graph, F> SpaceTime<'a, G, F> {
             graph,
             costs,
             constraints,
-            earliest_finish: constraints
-                .blocked_until(agent.goal)
-                .map_or(0, |t| t.saturating_add(1)),
-            horizon: constraints.latest_step().saturating_add(vertices),
+            earliest_finish: constraints.earliest_finish(agent.goal),
+            horizon: constraints.horizon(graph.vertex_count()),
         }
     }
 }

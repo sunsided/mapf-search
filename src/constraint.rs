@@ -197,6 +197,23 @@ impl Constraint {
             Self::PositiveEdge { from, to, time, .. } => at(time) != from || at(time + 1) != to,
         }
     }
+    /// The agents whose paths in `paths`, indexed by agent, must be replanned once this
+    /// constraint is added: its own agent for a negative constraint, every other agent
+    /// whose path breaks what a positive one implies for it.
+    pub(crate) fn affected<P: AsRef<[Vertex]>>(&self, paths: &[P]) -> Vec<AgentId> {
+        if !self.is_positive() {
+            return Vec::from([self.agent()]);
+        }
+
+        (0..paths.len())
+            .filter(|&agent| agent != self.agent())
+            .filter(|&agent| {
+                self.implied_for(agent)
+                    .iter()
+                    .any(|implied| implied.is_violated_by(paths[agent].as_ref()))
+            })
+            .collect()
+    }
 }
 
 /// The constraints of one agent, indexed for the checks of a space-time search.
@@ -344,6 +361,21 @@ impl ConstraintSet {
     #[must_use]
     pub fn latest_step(&self) -> Time {
         self.latest_step
+    }
+
+    /// The first time an agent may arrive at `goal` for good: one after the latest time
+    /// the goal is forbidden ([`ConstraintSet::blocked_until`]), `0` if never.
+    pub(crate) fn earliest_finish(&self, goal: Vertex) -> Time {
+        self.blocked_until(goal).map_or(0, |t| t.saturating_add(1))
+    }
+
+    /// The latest time a search under these constraints on a graph of `vertex_count`
+    /// vertices needs to reach: after [`ConstraintSet::latest_step`] nothing changes any
+    /// more, and from there every reachable goal is at most `vertex_count - 1` steps away.
+    pub(crate) fn horizon(&self, vertex_count: usize) -> Time {
+        let vertices = Time::try_from(vertex_count).unwrap_or(Time::MAX);
+
+        self.latest_step.saturating_add(vertices)
     }
 
     /// The latest time `vertex` is forbidden, if ever: by a negative constraint, or by a

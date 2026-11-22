@@ -25,7 +25,7 @@ use core::cmp::Reverse;
 
 use crate::graph::{Graph, Vertex};
 use crate::instance::Agent;
-use crate::path::{Path, Time};
+use crate::path::{Path, Reservation, Time, reservations};
 
 /// The end of an interval that never ends.
 const FOREVER: Time = Time::MAX;
@@ -50,26 +50,8 @@ impl Obstacles {
             parked: BTreeMap::new(),
             swaps: BTreeSet::new(),
         };
-        let time = |index: usize| Time::try_from(index).expect("path lengths fit in u32");
-
-        for path in paths {
-            let last = path.len() - 1;
-            for (index, &vertex) in path[..last].iter().enumerate() {
-                obstacles
-                    .visits
-                    .entry(vertex)
-                    .or_default()
-                    .push(time(index));
-            }
-
-            for (index, step) in path.windows(2).enumerate() {
-                if step[0] != step[1] {
-                    obstacles.swaps.insert((step[1], step[0], time(index + 1)));
-                }
-            }
-
-            let since = obstacles.parked.entry(path[last]).or_insert(time(last));
-            *since = (*since).min(time(last));
+        for reservation in paths.into_iter().flat_map(|path| reservations(path)) {
+            obstacles.add(reservation);
         }
 
         for steps in obstacles.visits.values_mut() {
@@ -77,6 +59,23 @@ impl Obstacles {
         }
 
         obstacles
+    }
+
+    /// Records one reservation of another agent's path. A move is kept as the swap it
+    /// forbids: the reverse move, arriving at the same step.
+    fn add(&mut self, reservation: Reservation) {
+        match reservation {
+            Reservation::Visit { vertex, time } => {
+                self.visits.entry(vertex).or_default().push(time);
+            }
+            Reservation::Move { from, to, time } => {
+                self.swaps.insert((to, from, time + 1));
+            }
+            Reservation::Park { vertex, time } => {
+                let since = self.parked.entry(vertex).or_insert(time);
+                *since = (*since).min(time);
+            }
+        }
     }
 
     /// The safe intervals of `vertex`, in order, covering `[0, inf)`.

@@ -2,7 +2,7 @@
 //! one time step for all agents at a time, very fast, neither optimal nor complete.
 //!
 //! Each step, every agent that has not reached its goal gains priority; one that has drops
-//! back to its distinct tie-breaker. In decreasing priority, each agent not yet planned
+//! back to its distinct tie-breaker: its distance from its start to its goal, then its id. In decreasing priority, each agent not yet planned
 //! takes the free neighbouring vertex (or its own) closest to its goal, preferring vertices
 //! nobody occupies. If the vertex it wants is occupied by an agent not yet planned, that
 //! agent inherits the priority and must move out of the way first, which may push further
@@ -29,9 +29,9 @@ use alloc::vec::Vec;
 use heuristic_search::{Budget, Stats};
 
 use crate::graph::{Graph, Vertex};
-use crate::instance::{AgentId, Instance};
+use crate::instance::{Agent, AgentId, Instance};
 use crate::low_level::distance_tables;
-use crate::path::Path;
+use crate::path::{Path, trim_trailing_waits};
 use crate::solution::{MapfResult, Outcome, Solution};
 
 /// Finds a conflict-free plan with PIBT: one time step for every agent at a time, by
@@ -69,17 +69,18 @@ use crate::solution::{MapfResult, Outcome, Solution};
 /// ```
 pub fn pibt<G: Graph>(instance: &Instance<G>, mut budget: impl Budget<Stats>) -> MapfResult {
     let distances = distance_tables(instance.graph(), instance.agents());
-    let reachable = instance
+    let start_distance: Option<Vec<u32>> = instance
         .agents()
         .iter()
         .zip(&distances)
-        .all(|(agent, distances)| distances[agent.start].is_some());
-    if !reachable {
+        .map(|(agent, distances)| distances[agent.start])
+        .collect();
+    let Some(start_distance) = start_distance else {
         return MapfResult {
             outcome: Outcome::Unsolvable,
             stats: Stats::default(),
         };
-    }
+    };
 
     let agents = instance.agents().len();
     let mut run = Run {
@@ -89,7 +90,7 @@ pub fn pibt<G: Graph>(instance: &Instance<G>, mut budget: impl Budget<Stats>) ->
         next: vec![None; agents],
         reserved: vec![None; instance.graph().vertex_count()],
         occupant: vec![None; instance.graph().vertex_count()],
-        waiting: vec![0; agents],
+        priorities: Priorities::new(start_distance),
         paths: instance
             .agents()
             .iter()
@@ -119,9 +120,8 @@ struct Run<'a, G> {
     reserved: Vec<Option<AgentId>>,
     /// The agent at each vertex at the current step, indexed by vertex.
     occupant: Vec<Option<AgentId>>,
-    /// How many steps each agent has spent away from its goal since it last stood there:
-    /// the integer part of its priority, indexed by agent.
-    waiting: Vec<u64>,
+    /// The agents' priorities.
+    priorities: Priorities,
     /// Each agent's positions so far, indexed by agent.
     paths: Vec<Path>,
     /// Counters reported in [`MapfResult::stats`].
@@ -132,7 +132,7 @@ impl<G: Graph> Run<'_, G> {
     /// Takes steps until every agent stands at its goal or the budget ends.
     fn solve(&mut self, budget: &mut impl Budget<Stats>) -> Outcome {
         loop {
-            if self.all_at_goals() {
+            if all_at_goals(&self.here, self.instance.agents()) {
                 return Outcome::Solved(Solution::new(self.trimmed_paths()));
             }
 
@@ -144,14 +144,6 @@ impl<G: Graph> Run<'_, G> {
         }
     }
 
-    /// Returns `true` if every agent stands at its goal.
-    fn all_at_goals(&self) -> bool {
-        self.here
-            .iter()
-            .zip(self.instance.agents())
-            .all(|(&here, agent)| here == agent.goal)
-    }
-
     /// One time step: updates the priorities, plans every agent by decreasing priority,
     /// then moves them.
     fn step(&mut self) {
@@ -159,29 +151,15 @@ impl<G: Graph> Run<'_, G> {
 
         for (agent, &here) in self.here.iter().enumerate() {
             self.occupant[here] = Some(agent);
-            if here == self.instance.agents()[agent].goal {
-                self.waiting[agent] = 0;
-            } else {
-                self.waiting[agent] += 1;
-            }
         }
 
-        for agent in self.by_priority() {
+        for agent in self.priorities.update(&self.here, self.instance.agents()) {
             if self.next[agent].is_none() {
                 self.plan(agent, None);
             }
         }
 
         self.advance();
-    }
-
-    /// The agents by decreasing priority: more steps away from the goal first, then the
-    /// larger agent id (the tie-breaker).
-    fn by_priority(&self) -> Vec<AgentId> {
-        let mut agents: Vec<AgentId> = (0..self.here.len()).collect();
-        agents.sort_unstable_by_key(|&agent| core::cmp::Reverse((self.waiting[agent], agent)));
-
-        agents
     }
 
     /// Moves every agent to its planned vertex and clears the step's bookkeeping.
@@ -260,13 +238,58 @@ impl<G: Graph> Run<'_, G> {
             .iter()
             .map(|path| {
                 let mut path = path.clone();
-                while path.len() > 1 && path[path.len() - 2] == path[path.len() - 1] {
-                    path.pop();
-                }
+                trim_trailing_waits(&mut path);
 
                 path
             })
             .collect()
+    }
+}
+
+/// Returns `true` if every agent, at `here` (indexed by agent), stands at its goal.
+pub(crate) fn all_at_goals(here: &[Vertex], agents: &[Agent]) -> bool {
+    here.iter()
+        .zip(agents)
+        .all(|(&here, agent)| here == agent.goal)
+}
+
+/// The priorities of PIBT and PIBT*_T: an agent ranks higher the more steps it has spent
+/// away from its goal since it last stood there. Ties go to the agent that started farther
+/// from its goal, then to the larger agent id: the distinct tie-breaker of the paper, set
+/// by distance as in `LaCAM`, so that at the first step the agents with the longest way go
+/// first instead of being blocked by one that parks early.
+#[derive(Debug, Clone)]
+pub(crate) struct Priorities {
+    /// How many steps each agent has spent away from its goal since it last stood there,
+    /// indexed by agent.
+    waiting: Vec<u64>,
+    /// Each agent's distance from its start to its goal, indexed by agent.
+    start_distance: Vec<u32>,
+}
+
+impl Priorities {
+    /// The priorities of agents that have not taken a step yet and start
+    /// `start_distance[agent]` steps from their goals.
+    pub(crate) fn new(start_distance: Vec<u32>) -> Self {
+        Self {
+            waiting: vec![0; start_distance.len()],
+            start_distance,
+        }
+    }
+
+    /// Counts one more step for the agents at `here` (indexed by agent) and returns them by
+    /// decreasing priority.
+    pub(crate) fn update(&mut self, here: &[Vertex], agents: &[Agent]) -> Vec<AgentId> {
+        for ((waiting, &here), agent) in self.waiting.iter_mut().zip(here).zip(agents) {
+            *waiting = if here == agent.goal { 0 } else { *waiting + 1 };
+        }
+
+        let mut order: Vec<AgentId> = (0..self.waiting.len()).collect();
+        order.sort_unstable_by_key(|&agent| {
+            core::cmp::Reverse((self.waiting[agent], self.start_distance[agent], agent))
+        });
+
+        order
     }
 }
 

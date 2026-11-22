@@ -48,9 +48,7 @@ impl Mdd {
         distances: &[Option<u32>],
         depth: Time,
     ) -> Option<Self> {
-        let goal_free_after = constraints
-            .blocked_until(agent.goal)
-            .is_none_or(|t| t < depth);
+        let goal_free_after = constraints.earliest_finish(agent.goal) <= depth;
         let start_fits = distances[agent.start].is_some_and(|d| d <= depth);
         if !goal_free_after || !start_fits || !constraints.allows_vertex(agent.start, 0) {
             return None;

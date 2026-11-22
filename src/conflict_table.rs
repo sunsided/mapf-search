@@ -11,7 +11,7 @@ use alloc::collections::BTreeMap;
 
 use crate::graph::Vertex;
 use crate::instance::AgentId;
-use crate::path::{Path, Time};
+use crate::path::{Path, Reservation, Time, reservations};
 
 /// Where the other agents are, for counting the conflicts of one agent's moves.
 #[derive(Debug, Clone, Default)]
@@ -55,23 +55,19 @@ impl ConflictTable {
 
     /// Records `path`, which must not be empty.
     fn add(&mut self, path: &[Vertex]) {
-        let last = path.len() - 1;
-        let time = |index: usize| Time::try_from(index).expect("path lengths fit in u32");
-
-        for (index, &vertex) in path[..last].iter().enumerate() {
-            *self.visits.entry((vertex, time(index))).or_default() += 1;
-        }
-
-        for (index, step) in path.windows(2).enumerate() {
-            if step[0] != step[1] {
-                *self
-                    .moves
-                    .entry((time(index), step[0], step[1]))
-                    .or_default() += 1;
+        for reservation in reservations(path) {
+            match reservation {
+                Reservation::Visit { vertex, time } => {
+                    *self.visits.entry((vertex, time)).or_default() += 1;
+                }
+                Reservation::Move { from, to, time } => {
+                    *self.moves.entry((time, from, to)).or_default() += 1;
+                }
+                Reservation::Park { vertex, time } => {
+                    self.parked.insert(vertex, time);
+                }
             }
         }
-
-        self.parked.insert(path[last], time(last));
     }
 
     /// The number of conflicts of the move `from -> to` (a wait if equal) between `time`

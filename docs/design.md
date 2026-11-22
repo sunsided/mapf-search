@@ -471,8 +471,11 @@ paper. It plans one time step for all agents at a time and stops at the first st
 which every agent stands at its goal. No objective, no quality guarantee, not complete.
 
 - **Priorities.** Each step, an agent away from its goal gains 1; one at its goal drops to
-  its tie-breaker. Here the priority is `(steps away from the goal, agent id)`
-  lexicographically, the integer part and a distinct tie-breaker in `[0, 1)` of the paper.
+  its tie-breaker. Here the priority is `(steps away from the goal, distance from the
+  start to the goal, agent id)` lexicographically: the integer part, then a distinct
+  tie-breaker in `[0, 1)` of the paper, set by distance as in LaCAM, so that at the first
+  step the agents with the longest way go first. PIBT*_T shares these priorities, with its
+  turn-aware distance.
 - **One step.** In decreasing priority, each agent not yet planned runs the recursive
   procedure: candidates are its vertex and its neighbours (those that reach the goal), by
   distance to the goal, unoccupied ones first, then by id. It skips vertices claimed for

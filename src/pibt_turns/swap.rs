@@ -17,7 +17,8 @@ use crate::instance::AgentId;
 impl<G: OrientedGraph> Run<'_, G> {
     /// The agent `agent` should swap with given its preferences `candidates`, best first:
     /// the occupant of its first choice, or a neighbour that wants to pass it; `None` if no
-    /// swap is required and possible.
+    /// swap is required and possible. A partner must have an edge back to `agent`'s vertex,
+    /// which it is pulled into; on a directed graph it may not.
     pub(super) fn swap_partner(&self, agent: AgentId, candidates: &[Vertex]) -> Option<AgentId> {
         let here = self.here[agent];
         let &first = candidates.first()?;
@@ -30,6 +31,7 @@ impl<G: OrientedGraph> Run<'_, G> {
         if let Some(other) = self.occupant[first] {
             let undecided = self.claim[other].is_none() && self.decided[other].is_none();
             if undecided
+                && self.has_edge(first, here)
                 && self.swap_required(agent, other, here, first)
                 && self.room_to_back_off(first, here)
             {
@@ -47,11 +49,22 @@ impl<G: OrientedGraph> Run<'_, G> {
         neighbors.into_iter().find_map(|vertex| {
             let other = self.occupant[vertex]?;
             let wants_through = vertex != first
+                && self.has_edge(vertex, here)
                 && self.swap_required(other, agent, here, first)
                 && self.room_to_back_off(first, here);
 
             wants_through.then_some(other)
         })
+    }
+
+    /// Returns `true` if the graph has an edge `from -> to`.
+    fn has_edge(&self, from: Vertex, to: Vertex) -> bool {
+        let mut found = false;
+        self.instance
+            .graph()
+            .neighbors(from, |next| found |= next == to);
+
+        found
     }
 
     /// Returns `true` if `pusher` at `pusher_at` pushing `puller` at `puller_at` would only
