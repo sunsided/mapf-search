@@ -8,14 +8,15 @@
 [![License](https://img.shields.io/crates/l/mapf-search)](https://github.com/sunsided/mapf-search#license)
 [![unsafe forbidden](https://img.shields.io/badge/unsafe-forbidden-success.svg)](https://github.com/rust-secure-code/safety-dance/)
 
-Multi-agent pathfinding: CBS, ECBS, ICTS, PBS, M\*, MAPF-LNS2 and multi-objective MO-CBS on
-grids and general graphs.
+Multi-agent pathfinding: CBS, CBS-TA, ECBS, ICTS, PBS, M\*, EPEA\*, MAPF-LNS2 and
+multi-objective MO-CBS on grids and general graphs.
 
 Given a graph and a set of agents with start and goal vertices, the solvers find one path per
-agent so that no two agents ever share a vertex or swap along an edge. CBS, ICTS and M\*
-minimize the sum of costs or the makespan, ECBS stays within a given factor of the optimum,
-and PBS and MAPF-LNS2 trade optimality for speed. The optimal solvers are checked against a joint-space oracle by
-property tests, and M\* also proves when an instance has no solution. The crate is
+agent so that no two agents ever share a vertex or swap along an edge. CBS, ICTS, M\* and
+EPEA\* minimize the sum of costs or the makespan, ECBS stays within a given factor of the optimum,
+and PBS and MAPF-LNS2 trade optimality for speed. CBS-TA also picks the goals: each agent gets one of its
+candidate goals, optimally over all assignments. The optimal solvers are checked against a joint-space oracle by
+property tests, and M\* and EPEA\* also prove when an instance has no solution. The crate is
 `no_std` with `alloc`, uses the A\* of
 [heuristic-search](https://github.com/sunsided/heuristic-search) as its single-agent low
 level, and reads the Moving AI `.map` and `.scen` benchmark formats.
@@ -27,7 +28,7 @@ level, and reads the Moving AI `.map` and `.scen` benchmark formats.
 - Game developers moving groups of units through tight corridors, where independent A\*
   per unit deadlocks or collides.
 - Researchers who want CBS and its improvements (prioritized conflicts, bypass, CG/DG/WDG
-  heuristics, disjoint splitting) switchable one by one, next to ECBS, ICTS, PBS and M\*
+  heuristics, disjoint splitting) switchable one by one, next to ECBS, ICTS, PBS, M\* and EPEA\*
   on the same instance type.
 - Planners that trade off several costs per agent (time, energy, risk): MO-CBS returns every
   Pareto-optimal joint plan, using
@@ -57,6 +58,9 @@ mapf-search = "0.1"
   bypass, the CG, DG and WDG heuristics, a conflict avoidance table and disjoint
   splitting (with positive constraints), each switchable (`cbs`, `cbs_with`,
   `CbsConfig`)
+- CBS-TA, conflict-based search with task assignment: each agent has candidate goals, and
+  the plan is optimal over all assignments, for sum of costs or makespan (`cbs_ta`,
+  `cbs_ta_with`, `TaskInstance`)
 - ECBS, bounded-suboptimal, focal search at both levels (`ecbs`)
 - PBS, priority-based search: fast, neither optimal nor complete (`pbs`)
 - MAPF-LNS2, large neighborhood search repair: starts from a plan with collisions and
@@ -65,6 +69,8 @@ mapf-search = "0.1"
 - ICTS with pairwise pruning, optimal (`icts`)
 - M*, basic and recursive (rM*), each with or without operator decomposition (OD-M*,
   ODrM*), optimal, proves unsolvability (`mstar`, `mstar_with`, `MStarConfig`)
+- EPEA\*, enhanced partial expansion A\* in the joint space: generates only the children
+  at the node's stored `f`, optimal, proves unsolvability (`epea`)
 - MO-CBS, multi-objective CBS: every Pareto-optimal plan when moves and waits cost
   vectors, shared or per agent; plain or tree-by-tree (MO-CBS-t), over BOA* or NAMOA*dr
   from `multiobjective-search`, with an opt-in feasibility check (proves unsolvability),
@@ -74,9 +80,6 @@ mapf-search = "0.1"
   an `Objective`: sum of costs or makespan
 - Shared parts: conflict detection, constraints, space-time A* low level, MDDs, Moving AI
   `.map`/`.scen` parsers
-
-Not yet implemented: CBS-TA (conflict-based search with task assignment) and EPEA\*
-(enhanced partial expansion).
 
 ## Usage
 

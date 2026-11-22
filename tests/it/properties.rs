@@ -198,6 +198,12 @@ proptest! {
         check(&grid, &agents, Solver::MStar(config))?;
     }
 
+    /// EPEA* agrees with the oracle, for both objectives.
+    #[test]
+    fn epea_matches_joint_search((grid, agents) in instance(), objective in objective()) {
+        check(&grid, &agents, Solver::Epea(objective))?;
+    }
+
     /// LNS2 plans are valid and no cheaper than the optimum; LNS2 may stop at its budget.
     #[test]
     fn lns2_plans_are_valid((grid, agents) in instance(), objective in objective()) {

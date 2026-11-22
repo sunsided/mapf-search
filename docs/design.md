@@ -1,8 +1,9 @@
 # mapf-search design
 
 Multi-agent pathfinding (MAPF): find one path per agent so that no two agents collide,
-minimizing a joint objective. This crate hosts the conflict-based family (CBS, ECBS,
-MO-CBS), ICTS, PBS, M* and MAPF-LNS2; CBS-TA and EPEA* are on the roadmap.
+minimizing a joint objective. This crate hosts the conflict-based family (CBS, CBS-TA,
+ECBS, MO-CBS), ICTS, PBS, M*, EPEA* and MAPF-LNS2; SIPPS, a faster low level for
+MAPF-LNS2, is on the roadmap.
 
 These algorithms share the problem model, path conflicts, joint objectives, constraints
 and reservations, and the single-agent low-level search. They do **not** share one search
@@ -70,8 +71,8 @@ The other solvers:
 - **ICTS** searches the chain of vectors `(m, ..., m)` from the largest individual optimum
   on. An MDD of depth `m` contains the paths that arrive earlier and wait, so the first
   solvable `m` is the optimal makespan.
-- **M\*** solves makespan through sum of costs under deadlines (see M*). Its plan also
-  has the least sum of costs among the makespan-optimal plans.
+- **M\*** and **EPEA\*** solve makespan through sum of costs under deadlines (see M*).
+  Their plans also have the least sum of costs among the makespan-optimal plans.
 
 The other solvers do not minimize the sum of costs among the makespan-optimal plans.
 
@@ -286,6 +287,54 @@ Every solver returns a `MapfResult`: an `Outcome` and high-level `Stats`. `Outco
 `Solved(Solution)`, `Unsolvable` (a proof), `LimitReached` (the budget stopped the run) or
 `Exhausted`. Only PBS returns `Exhausted`: it ran out of options, which proves nothing.
 
+## CBS-TA (Hönig et al. 2018)
+
+`cbs_ta(instance, objective, budget)` and `cbs_ta_with(instance, config, budget)` solve a
+`TaskInstance`: each agent has a start and a list of candidate goals, and a solution ends
+every agent at a distinct one of its candidates. Agents may share candidates. The result is
+optimal over all assignments and plans; agent `i`'s goal is the last vertex of its path.
+
+- **Forest.** One constraint tree per assignment, each searched exactly as by `cbs_with`
+  (all of `CbsConfig` applies). The CBS `Search` holds the starts, the candidate goals with
+  one distance table each, and the assignment of every opened tree; a node carries its tree
+  index, and the low level, the MDDs and WDG's pair weights look up the agent's goal
+  through it. WDG's cache key includes the pair's goals, so trees that assign a pair the
+  same goals share weights. Plain CBS is the forest with one tree, agent `i` at goal `i`.
+- **Assignments in order of cost.** `assignment.rs` ranks the assignments of the cost
+  matrix (agent to candidate: the shortest distance, or none if the goal is not a
+  candidate or unreachable) with Murty's partitioning over the Hungarian method. For sum
+  of costs the key is the sum. For makespan it is the bottleneck, then the sum: the
+  smallest threshold that still admits an assignment, found by a binary search over the
+  distinct entries, each step a Hungarian solve with the larger entries removed.
+- **Opening trees.** Before each pop, the next ranked assignment becomes a tree while its
+  cost is below the best open key, or while nothing is open. An assignment's cost is the
+  objective of its root without heuristic, which bounds every node of its tree from below,
+  so no closed tree can beat the node popped next.
+
+### Paper comparison
+
+| Paper (Hönig et al. 2018) | Here | Status |
+| --- | --- | --- |
+| Binary `N x M` assignment matrix `A`; goals may outnumber agents | candidate goal list per agent; goals are their union | same |
+| An agent without an assigned goal only has to stop somewhere | every agent needs a goal; fewer goals than agents is `Unsolvable` | narrower |
+| Sum of individual costs | `Objective::SumOfCosts`, plus makespan via bottleneck assignments | generalized |
+| Forest of constraint trees, one per assignment | the same, in one open list | same |
+| Next root created when a root node is expanded | next root opened when its cost is below the best open key | lazier, same optimality; also correct with CBS heuristics and bypass |
+| `constrainedAssignment(I, O, C)`: forced entries cost 0, forbidden ones infinity, then the Hungarian method | forced pairs clear the rest of their row and column, forbidden pairs are removed | same partition |
+| Plain CBS high level | every `CbsConfig` improvement | beyond the paper |
+| ECBS-TA (bounded suboptimal) | not implemented | missing |
+
+### Tests
+
+A property test compares `cbs_ta_with` on random 3x3 instances (up to three agents, one to
+three candidates each, both objectives, plain and improved) with CBS run on every
+assignment. Another checks that the ranked assignments match brute-force enumeration in
+order and count. With one candidate per agent, CBS-TA returns what CBS returns, with the
+same statistics. The fuzz target runs CBS-TA with every agent allowed at every goal and
+checks the plan and that it costs no more than CBS's. The benchmark runs it on the
+eight-agent instance with all goals shared: about 53 µs (bench profile, shared machine),
+against about 1.1 ms for `cbs` on the fixed assignment.
+
 ## ECBS (Barer et al. 2014)
 
 `ecbs(instance, objective, weight, budget)` returns a plan whose objective value is at
@@ -489,6 +538,54 @@ among such plans, the least sum of costs. On the benchmark `L = U = 14`, so make
 one sum-of-costs search: rM* 30 ms instead of 83 s, basic M* 330 ms, OD-M* 25 ms. A
 deadline search that fails must exhaust its time-expanded space, so instances whose
 optimal makespan is far above `L` cost more.
+
+## EPEA* (Goldenberg et al. 2014)
+
+`epea(instance, objective, budget)`: A* in the joint space of all agents, with enhanced
+partial expansion. States and pricing are those of M*: every agent's vertex and finished
+flag, finishing at the goal is free, every other unfinished agent pays 1 per step, and the
+heuristic is the sum of the unfinished agents' distances. Makespan uses M*'s deadline
+searches. The joint space is finite, so EPEA* proves unsolvability, like M*.
+
+- **Partial expansion.** A node stores `F`, initially its `f`. Expanding it generates only
+  the children with `f = F`; then `F` becomes the next larger `f` among its children and
+  the node goes back into the open list, or is closed if there is none. Each partial
+  expansion counts once in `Stats::expanded`. Ties in `F` go to the smaller `h`.
+- **Operator selection function** (`epea/osf.rs`). With the sum of distances as
+  heuristic, a joint step raises `f` by the sum of the agents' own rises: `1 + d(next) -
+  d(here)` for a move or wait, never negative and at most `2` on an undirected graph (a
+  directed edge into a one-way detour can raise it more), and `0` for finishing or staying
+  finished. Each agent's moves are sorted by rise; a depth-first search over the agents
+  picks one move each, keeps the remaining target within the remaining agents' least and
+  most total rise, and drops colliding combinations (same vertex, or a swap) as it goes.
+  The next `F` is the smallest achievable total rise above the current one, from a
+  subset-sum over the agents' rise sets, collisions ignored: a node whose children at
+  some `F` all collide is just expanded again at the next one.
+- **Duplicates.** States are kept in a `BTreeMap` with their best `g`. With a consistent
+  heuristic and pops in order of `F`, a state is first generated with its optimal `g`; a
+  cheaper path would still reopen it (`Stats::reopened`), but none occurs in the tests.
+
+### Paper comparison
+
+| Paper (Goldenberg et al. 2014) | Here | Status |
+| --- | --- | --- |
+| Stored value `F(n)`, initially `f(n)`; expand generates children with `f = F(n)`, then `F(n)` becomes the next value or `n` is closed | the same | same |
+| MAPF operator selection: per-agent rises of `f` under the sum of individual costs, combined to the target | the same, with goal-stay finishing at rise 0 | same |
+| Collisions checked on generated children | checked while combining agent moves | same result, earlier pruning |
+| Next `F` from the OSF, regardless of collisions | subset-sum over the agents' rise sets | same |
+| Sum of individual costs | sum of costs, plus makespan via M*'s deadline searches | generalized |
+| Plain joint state per time step | M*'s states with finished flags (goal-stay); time only under a deadline | same model as the oracle |
+
+### Tests and measurements
+
+EPEA* is one of the solvers of the shared tests: the hand-made cases (stepping off a goal,
+passing a finished goal, an unreachable goal, the corridor swap, which it proves
+unsolvable), the property test against the joint-space oracle for both objectives, the
+cross-check against CBS, ICTS and M* on larger grids, and the solver fuzz target. On the
+benchmark's eight-agent instance it takes about 6 ms (bench profile, shared machine):
+1 592 expansions and 11 686 generated children for the optimal sum of costs 92, against
+about 12 s and 5.4 million expansions for ODrM*. That makespan is also the lower bound, so
+no deadline search runs.
 
 ## MO-CBS (Ren, Rathinam and Choset 2021)
 
@@ -720,16 +817,10 @@ already collision-free, so the benchmark (about 140 µs) measures prioritized pl
 
 ## Later algorithms
 
-- **CBS-TA** (Hönig et al. 2018): task assignment plus pathfinding. The root enumerates
-  assignments in order of cost (Murty's k-best assignments); each CT node also carries
-  an assignment. Agents get a set of candidate goals.
 - **SIPPS** (Li et al. 2022) as the low level of MAPF-LNS2: safe-interval path planning
   with soft obstacles, about five times faster per call than the space-time A* used now.
   SIPP intervals are a different state space, so it is a local module, not a
   heuristic-search adapter.
-- **EPEA*** (Goldenberg et al. 2014): partial expansion A* for the joint space, using
-  operator selection functions to generate only children with `f = F`. Useful for joint
-  search and as an ICTS/M* alternative. Belongs in heuristic-search if it is generic.
 
 ## Benchmarks: Moving AI format
 
@@ -768,7 +859,7 @@ lower bound on 4-connected grids. Moves stay 4-connected, as in the MAPF benchma
 - **Properties** (proptest, case count fixed in code), for every solver behind one
   `Solver` enum in the tests: plain and improved CBS (also with WDG), each CBS
   improvement alone (plus bypass and WDG each with disjoint splitting), ECBS at `w = 1`
-  and at `w` in {1.1, 1.5, 2, 3}, ICTS, basic and recursive M* and PBS, each for both
+  and at `w` in {1.1, 1.5, 2, 3}, ICTS, basic and recursive M*, EPEA* and PBS, each for both
   objectives. When
   the oracle finds an optimum, a solved plan must pass the plan checker and be within the
   solver's guarantee: equal for the optimal solvers, at most `w` times for ECBS, at least
@@ -815,7 +906,7 @@ lower bound on 4-connected grids. Moves stay 4-connected, as in the MAPF benchma
 
 ## Roadmap
 
-SIPP and SIPPS, CBS-TA and EPEA*.
+SIPP and SIPPS.
 
 ## Cross-crate needs
 
@@ -925,7 +1016,10 @@ level cannot yet (see ECBS).
   finding with conflict-based search. IJCAI 2019.
 - J. Li, D. Harabor, P. Stuckey, H. Ma, S. Koenig. Disjoint splitting for multi-agent path
   finding with conflict-based search. ICAPS 2019.
-- W. Hönig et al. Conflict-based search with optimal task assignment. AAMAS 2018. (CBS-TA)
+- W. Hönig, S. Kiesel, A. Tinka, J. W. Durham, N. Ayanian. Conflict-based search with
+  optimal task assignment. AAMAS 2018. (CBS-TA)
+- K. G. Murty. An algorithm for ranking all the assignments in order of increasing cost.
+  Operations Research 16, 1968.
 - G. Sharon, R. Stern, M. Goldenberg, A. Felner. The increasing cost tree search for
   optimal multi-agent pathfinding. Artificial Intelligence 195, 2013. (ICTS)
 - H. Ma, D. Harabor, P. Stuckey, J. Li, S. Koenig. Searching with consistent
@@ -934,7 +1028,8 @@ level cannot yet (see ECBS).
   Artificial Intelligence 219, 2015. (M*)
 - J. Li, Z. Chen, D. Harabor, P. Stuckey, S. Koenig. MAPF-LNS2: fast repairing for
   multi-agent path finding via large neighborhood search. AAAI 2022.
-- M. Goldenberg et al. Enhanced partial expansion A*. JAIR 50, 2014. (EPEA*)
+- M. Goldenberg, A. Felner, R. Stern, G. Sharon, N. Sturtevant, R. Holte, J. Schaeffer.
+  Enhanced partial expansion A*. JAIR 50, 2014. (EPEA*)
 - D. Silver. Cooperative pathfinding. AIIDE 2005. (space-time A*, reservation tables)
 - M. Phillips, M. Likhachev. SIPP: safe interval path planning for dynamic
   environments. ICRA 2011.

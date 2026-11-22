@@ -1,8 +1,10 @@
 //! Fuzzes the solvers on tiny grids built from raw bytes: every plan a solver returns must be
 //! valid (each path runs from the agent's start to its goal, each step waits or moves to a
-//! neighbouring cell, moves run between free cells, and no two paths conflict), and the optimal solvers (CBS, ICTS and M*) must
+//! neighbouring cell, moves run between free cells, and no two paths conflict), and the optimal solvers (CBS, ICTS, M* and EPEA*) must
 //! report the same cost whenever more than one of them solves the instance within its
-//! budget. ECBS, PBS and LNS2 must return valid plans. Blocked cells are vertices without edges, so an agent whose start is its goal
+//! budget. CBS-TA runs on the same agents with every agent's goal as a candidate of every
+//! agent: its plan must end each agent at a distinct one, and cost no more than CBS's. ECBS,
+//! PBS and LNS2 must return valid plans. Blocked cells are vertices without edges, so an agent whose start is its goal
 //! may wait on a blocked cell. Instances stay at the scale of the property tests, so budgets stay small.
 
 #![no_main]
@@ -10,8 +12,8 @@
 
 use libfuzzer_sys::fuzz_target;
 use mapf_search::{
-    Agent, Grid, Instance, Limits, Lns2Config, MapfResult, Objective, Weight, cbs, ecbs,
-    first_conflict, icts, lns2, mstar, pbs,
+    Agent, Grid, Instance, Limits, Lns2Config, MapfResult, Objective, TaskAgent, TaskInstance,
+    Weight, cbs, cbs_ta, ecbs, epea, first_conflict, icts, lns2, mstar, pbs,
 };
 
 /// The most columns and rows a fuzzed grid has.
@@ -101,6 +103,45 @@ fn assert_valid(instance: &Instance<Grid>, result: &MapfResult, solver: &str) {
     assert_eq!(first_conflict(&solution.paths), None, "{solver}: conflict");
 }
 
+/// Runs CBS-TA with every goal of `instance` as a candidate of every agent and checks its
+/// plan against `cbs`, CBS's result on the fixed assignment.
+fn check_task_assignment(instance: &Instance<Grid>, objective: Objective, cbs: &MapfResult) {
+    let goals: Vec<_> = instance.agents().iter().map(|agent| agent.goal).collect();
+    let agents = instance
+        .agents()
+        .iter()
+        .map(|agent| TaskAgent {
+            start: agent.start,
+            goals: goals.clone(),
+        })
+        .collect();
+    let tasks = TaskInstance::new(instance.graph().clone(), agents).expect("starts are distinct");
+    let result = cbs_ta(&tasks, objective, Limits::expansions(BUDGET));
+    let Some(solution) = result.solution() else {
+        return;
+    };
+
+    let mut ends: Vec<_> = solution
+        .paths
+        .iter()
+        .map(|path| path.last().copied())
+        .collect();
+    ends.sort_unstable();
+    ends.dedup();
+    assert_eq!(ends.len(), goals.len(), "cbs_ta: shared goal");
+    for (path, agent) in solution.paths.iter().zip(instance.agents()) {
+        assert_eq!(path.first(), Some(&agent.start), "cbs_ta: start");
+    }
+
+    assert_eq!(first_conflict(&solution.paths), None, "cbs_ta: conflict");
+    if let Some(fixed) = cbs.solution() {
+        assert!(
+            solution.cost(objective) <= fixed.cost(objective),
+            "cbs_ta costs more than cbs"
+        );
+    }
+}
+
 fuzz_target!(|data: &[u8]| {
     let Some((objective, instance)) = parse(data) else {
         return;
@@ -111,6 +152,7 @@ fuzz_target!(|data: &[u8]| {
         ("cbs", cbs(&instance, objective, budget())),
         ("icts", icts(&instance, objective, budget())),
         ("mstar", mstar(&instance, objective, budget())),
+        ("epea", epea(&instance, objective, budget())),
     ];
     for (solver, result) in &optimal {
         assert_valid(&instance, result, solver);
@@ -124,6 +166,8 @@ fuzz_target!(|data: &[u8]| {
             assert_eq!(cost, other, "{first} and {solver} disagree on the optimum");
         }
     }
+
+    check_task_assignment(&instance, objective, &optimal[0].1);
 
     let weight = Weight::new(3, 2);
     assert_valid(

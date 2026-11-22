@@ -6,7 +6,7 @@ use std::hint::black_box;
 use criterion::Criterion;
 use mapf_search::{
     Agent, CbsConfig, Grid, Instance, Limits, Lns2Config, MStarConfig, MapfResult, Objective,
-    Weight, cbs_with, ecbs, icts, lns2, mstar_with, pbs,
+    TaskAgent, TaskInstance, Weight, cbs_ta, cbs_with, ecbs, epea, icts, lns2, mstar_with, pbs,
 };
 
 /// The benchmark instance: eight agents crossing an 8x8 map with a few walls.
@@ -33,24 +33,42 @@ fn instance() -> Instance<Grid> {
     Instance::new(grid, agents).expect("valid")
 }
 
+/// The benchmark instance with every agent allowed at every agent's goal.
+fn anonymous(instance: &Instance<Grid>) -> TaskInstance<Grid> {
+    let goals: Vec<_> = instance.agents().iter().map(|agent| agent.goal).collect();
+    let agents = instance
+        .agents()
+        .iter()
+        .map(|agent| TaskAgent {
+            start: agent.start,
+            goals: goals.clone(),
+        })
+        .collect();
+
+    TaskInstance::new(instance.graph().clone(), agents).expect("valid")
+}
+
 /// Benchmarks every solver.
 fn main() {
     let instance = instance();
+    let tasks = anonymous(&instance);
     let budget = || Limits::expansions(100_000);
     let soc = Objective::SumOfCosts;
-    let solvers: [(&str, &dyn Fn() -> MapfResult); 10] = [
+    let solvers: [(&str, &dyn Fn() -> MapfResult); 12] = [
         ("cbs plain", &|| {
             cbs_with(&instance, CbsConfig::plain(soc), budget())
         }),
         ("cbs improved", &|| {
             cbs_with(&instance, CbsConfig::improved(soc), budget())
         }),
+        ("cbs-ta anonymous", &|| cbs_ta(&tasks, soc, budget())),
         ("ecbs w=1.5", &|| {
             ecbs(&instance, soc, Weight::new(3, 2), budget())
         }),
         ("pbs", &|| pbs(&instance, soc, budget())),
         ("lns2", &|| lns2(&instance, Lns2Config::default(), budget())),
         ("icts", &|| icts(&instance, soc, budget())),
+        ("epea", &|| epea(&instance, soc, budget())),
         ("mstar basic", &|| {
             mstar_with(&instance, MStarConfig::basic(soc), budget())
         }),

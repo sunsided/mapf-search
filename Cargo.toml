@@ -1,6 +1,6 @@
 [package]
 name = "mapf-search"
-description = "Multi-agent pathfinding on grids and graphs: CBS with its improvements, ECBS, ICTS, PBS, M* and multi-objective MO-CBS"
+description = "Multi-agent pathfinding on grids and graphs: CBS with its improvements, CBS-TA, ECBS, ICTS, PBS, M*, EPEA*, MAPF-LNS2 and multi-objective MO-CBS"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.86"
