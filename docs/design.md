@@ -2,8 +2,8 @@
 
 Multi-agent pathfinding (MAPF): find one path per agent so that no two agents collide,
 minimizing a joint objective. This crate hosts the conflict-based family (CBS, CBS-TA,
-FOCBS, ECBS, MO-CBS), ICTS, PBS, PIBT, M*, EPEA* and MAPF-LNS2 (over SIPPS); the
-turn-aware PIBT*_T is on the roadmap.
+FOCBS, ECBS, MO-CBS), ICTS, PBS, PIBT and the turn-aware PIBT*_T, M*, EPEA* and MAPF-LNS2
+(over SIPPS).
 
 These algorithms share the problem model, path conflicts, joint objectives, constraints
 and reservations, and the single-agent low-level search. They do **not** share one search
@@ -48,8 +48,8 @@ engine with pluggable policies.
   is `sum(len_i - 1)`.
 - **Makespan**: `max_i T_i`.
 
-Every solver but LNS2 and PIBT, which only seek a feasible plan, and FOCBS, which minimizes
-the sum of costs, takes an `Objective` (`SumOfCosts` or `Makespan`). For CBS, both objectives
+Every solver but LNS2, PIBT and PIBT*_T, which only seek a feasible plan, and FOCBS, which
+minimizes the sum of costs, takes an `Objective` (`SumOfCosts` or `Makespan`). For CBS, both objectives
 use the same low level: each agent's path is the cheapest one under its constraints, so a CT node's makespan is
 a lower bound on the makespan of every solution below it, just as its SoC is for SoC.
 Ordering the CT by makespan is therefore makespan-optimal. Ties go to the lower SoC, but
@@ -511,6 +511,72 @@ tests, and it runs in the solver fuzz target. On the benchmark's eight-agent ins
 takes about 58 µs (bench profile, shared machine) for 26 steps, with sum of costs 123
 against the optimum 92.
 
+## PIBT*_T (Tao, Yu and Hu 2026)
+
+`pibt_turns(instance, headings, seed, budget)` plans agents that face a heading, move only
+forward and turn in place, on any `OrientedGraph`: a `Graph` with a fixed number of
+headings, `forward(vertex, heading)` and `turns(heading)`, whose neighbours are exactly
+the forward vertices. `Grid` is one, with four headings and quarter turns. The result is
+a `TurnResult`: a `MapfResult` whose paths list every step of the run (turns are waits, so
+conflicts and costs are checked as for any plan) and each agent's heading per step.
+
+- **Model.** Each step an agent moves forward keeping its heading, turns once, or waits; a
+  turning agent keeps its vertex. Conflicts are the usual vertex and swap conflicts; the
+  goal needs no heading. A half turn on a grid takes two steps.
+- **Costs** (`pibt_turns/costs.rs`). The fewest turns between headings (breadth-first over
+  `turns`), and per agent an exact backward breadth-first search over `(vertex, heading)`
+  states to its goal. `TC` for a request is the turns and the move to get there (or one
+  step for staying) plus the remaining steps from the state it arrives in.
+  `Compute_action` moves if the agent faces the request, else turns once along a shortest
+  turn sequence (on a grid: counter-clockwise first for a half turn, as in the paper).
+- **Step.** PIBT's procedure with the paper's additions: candidates by `TC` (unoccupied
+  first, random among equals after a seeded shuffle), the k-push escape trigger (`k = 2`,
+  shuffle and reset), the swap detector, and the remembered request of an agent that turned
+  or waited towards a vertex (first again at the next step). An agent claims a vertex,
+  lets an undecided occupant decide first, then decides; if the occupant stays (it only
+  turns), the agent waits instead of moving in. A request that reaches the vertex of the
+  agent that started the chain closes a cycle: all its agents move at once if each faces
+  its request, else the misaligned turn and the others wait. A cycle cannot close on a
+  later agent of the chain, since each stands on a vertex its pusher has claimed.
+- **Swaps** (`pibt_turns/swap.rs`): the PIBT+/LaCAM rule on heading-free distances (the
+  least over headings), as in the reference code: required if pushing only drives the
+  other agent down a corridor the pusher is heading along and the two want to cross,
+  possible if, with the roles reversed, the pusher can back off down its corridor to room
+  to step aside before a dead end. A neighbour behind the agent that wants through (the
+  clear operation of push and swap) is judged as if it stood at the agent's vertex. The pusher then
+  reverses its preferences and pulls the other agent into its vertex (turning it first if
+  needed), unless the pusher stays. Corridor walks are capped at the vertex count, since
+  on directed graphs they need not return.
+
+### Paper comparison
+
+| Paper (Tao, Yu and Hu 2026, arXiv:2611.23911v1) / reference code (MIT) | Here | Status |
+| --- | --- | --- |
+| 4-connected grids, 4 orientations, 90° turns, forward moves | any `OrientedGraph`; `Grid` is the paper's model | generalized |
+| Algorithm 1, `Compute_action`, LGS node selection (`TC`) | the same | same |
+| Cost tables by BFS over the state graph | the same, one table per agent to its goal facing any way | same |
+| Cycle handling (Definition 1, Propositions 1-2), detected at the chain's initiator | the same | same |
+| Swap pattern detector (prose only; reference code) | ported from the reference, with capped corridor walks | same rule |
+| k-push escape trigger, `k = 2`; reference resets the count after a shuffle | the same | same |
+| Remembered target of a turning agent (reference `reserved_nodes`) | `intent`, requested first next step | same idea, simpler state |
+| Priorities: elapsed, then initial distance, then a random tie-breaker (reference) | elapsed, then agent id | simpler |
+| ADG execution model | not part of the planner | not applicable |
+
+### Tests and measurements
+
+An independent validator (only `forward` and `turns`, not `Compute_action`) checks every
+plan: each step waits, turns once, or moves forward without turning, and no two agents
+conflict. A property test on random grids (3x3 to 4x4, walls, 2-5 agents, random headings
+and seeds) checks every step of a 100-step run whether or not it finishes, the returned
+plans, and that the same seed gives the same run. In a 20 000-case run it took 30 000
+cycle resolutions, 7 600 pulls and 118 000 escape shuffles, and solved 85% of the cases
+within 300 steps. Unit tests cover the cost tables and actions, an aligned and a
+misaligned 2x2 carousel (a four-agent cycle), turning before moving, a one-way ring with a
+single heading (a non-grid `OrientedGraph`), an unreachable goal and a missing heading.
+The fuzz target runs it with headings from the input. On the benchmark's eight-agent
+instance, all facing east, it takes about 0.2 ms (bench profile, noisy machine), against
+about 56 µs for PIBT without turns.
+
 ## ICTS (Sharon et al. 2013)
 
 `icts(instance, objective, budget)`: the high level visits cost vectors in order of their sum
@@ -954,11 +1020,6 @@ about 2-4 s with SIPPS and 30 s with the space-time A* (shared machine, noisy), 
 A* run was stopped after 9 minutes. On sparse instances SIPPS's interval bookkeeping
 makes it up to about twice as slow per call as A*, at a few microseconds.
 
-## Later algorithms
-
-- **PIBT\*_T** (Tao, Yu and Hu, arXiv:2611.23911): PIBT with turn actions, which needs an
-  orientation in the state model (issue #12).
-
 ## Benchmarks: Moving AI format
 
 Support the grid benchmarks of Stern et al. (2019), <https://movingai.com/benchmarks/mapf/>:
@@ -1043,7 +1104,7 @@ lower bound on 4-connected grids. Moves stay 4-connected, as in the MAPF benchma
 
 ## Roadmap
 
-PIBT*_T (turn actions).
+Nothing is planned at the moment.
 
 ## Cross-crate needs
 
@@ -1168,6 +1229,9 @@ level cannot yet (see ECBS).
   2022. (PIBT)
 - X. Jin, C. Qian, R. Zhang, G. Wu, X. Li, J. Jiang, W. Shang. Asymmetric decomposition
   for multi-agent path finding with unassigned agents. arXiv:2611.24108v1, 2026. (FOCBS)
+- Z. Tao, C. Yu, Y. Hu. Scalable iterative multi-agent path finding under turn
+  constraints. arXiv:2611.23911v1, 2026; reference code https://github.com/tzy82065/PIBTT2
+  (MIT). (PIBT*_T)
 - J. Li, Z. Chen, D. Harabor, P. Stuckey, S. Koenig. MAPF-LNS2: fast repairing for
   multi-agent path finding via large neighborhood search. AAAI 2022.
 - M. Goldenberg, A. Felner, R. Stern, G. Sharon, N. Sturtevant, R. Holte, J. Schaeffer.

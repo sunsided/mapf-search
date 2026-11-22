@@ -7,7 +7,7 @@ use criterion::Criterion;
 use mapf_search::{
     Agent, CbsConfig, Grid, Instance, Limits, Lns2Config, MStarConfig, MapfResult, Objective,
     TaskAgent, TaskInstance, UaInstance, Weight, cbs_ta, cbs_with, ecbs, epea, focbs, icts, lns2,
-    mstar_with, pbs, pibt,
+    mstar_with, pbs, pibt, pibt_turns,
 };
 
 /// The benchmark instance: eight agents crossing an 8x8 map with a few walls.
@@ -60,6 +60,17 @@ fn crowded() -> Instance<Grid> {
         .collect();
 
     Instance::new(Grid::new(8, 8), agents).expect("valid")
+}
+
+/// Benchmarks PIBT*_T on `instance`, every agent facing east at the start.
+fn bench_turns(c: &mut Criterion, instance: &Instance<Grid>) {
+    let east = vec![Grid::EAST; instance.agents().len()];
+    let solve = || pibt_turns(instance, &east, 0, Limits::expansions(100_000));
+    assert!(
+        solve().result.solution().is_some(),
+        "pibt_turns solves the benchmark"
+    );
+    c.bench_function("pibt_turns", |b| b.iter(|| black_box(solve())));
 }
 
 /// The benchmark instance with its last two agents left without goals.
@@ -135,6 +146,8 @@ fn main() {
     c.bench_function("focbs two idle", |b| {
         b.iter(|| black_box(focbs(&idle, budget())));
     });
+
+    bench_turns(&mut c, &instance);
 
     c.final_summary();
 }

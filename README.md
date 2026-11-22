@@ -8,8 +8,8 @@
 [![License](https://img.shields.io/crates/l/mapf-search)](https://github.com/sunsided/mapf-search#license)
 [![unsafe forbidden](https://img.shields.io/badge/unsafe-forbidden-success.svg)](https://github.com/rust-secure-code/safety-dance/)
 
-Multi-agent pathfinding: CBS, CBS-TA, ECBS, ICTS, PBS, PIBT, M\*, EPEA\*, MAPF-LNS2 and
-multi-objective MO-CBS on grids and general graphs.
+Multi-agent pathfinding: CBS, CBS-TA, ECBS, ICTS, PBS, PIBT (also for agents that need time
+to turn), M\*, EPEA\*, MAPF-LNS2 and multi-objective MO-CBS on grids and general graphs.
 
 Given a graph and a set of agents with start and goal vertices, the solvers find one path per
 agent so that no two agents ever share a vertex or swap along an edge. CBS, ICTS, M\* and
@@ -70,6 +70,9 @@ mapf-search = "0.1"
 - PBS, priority-based search: fast, neither optimal nor complete (`pbs`)
 - PIBT, priority inheritance with backtracking: plans one time step for all agents at a
   time, very fast, neither optimal nor complete (`pibt`)
+- PIBT\*_T, PIBT for robots that face a heading, move only forward and need time to turn in
+  place, with cycle handling, swaps and a push escape trigger, on grids or any
+  `OrientedGraph`; seeded, neither optimal nor complete (`pibt_turns`, `TurnResult`)
 - MAPF-LNS2, large neighborhood search repair: starts from a plan with collisions and
   replans a few agents at a time with SIPPS (safe interval path planning with soft
   obstacles) until none are left; seeded, neither optimal nor complete (`lns2`,
@@ -84,9 +87,9 @@ mapf-search = "0.1"
   from `multiobjective-search`, with an opt-in feasibility check (proves unsolvability),
   conflict prioritization, bypass and disjoint splitting (`mo_cbs`, `mo_cbs_with`,
   `mo_cbs_per_agent`, `MoCbsConfig`; optional feature `multi-objective`)
-- Every single-objective solver except MAPF-LNS2 and PIBT, which only seek a feasible plan,
-  and FOCBS, which minimizes the sum of costs, takes an `Objective`: sum of costs or
-  makespan
+- Every single-objective solver except MAPF-LNS2, PIBT and PIBT\*_T, which only seek a
+  feasible plan, and FOCBS, which minimizes the sum of costs, takes an `Objective`: sum of
+  costs or makespan
 - Shared parts: conflict detection, constraints, space-time A* low level, MDDs, Moving AI
   `.map`/`.scen` parsers
 
