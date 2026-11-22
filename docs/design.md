@@ -686,8 +686,10 @@ other alone). It returns `Unsolvable` only for a goal unreachable even alone.
   current path. The new plan is kept if its number of colliding pairs did not grow. The
   method's weight becomes `γ · max(0, c⁻ - c⁺) + (1 - γ) · w` with `γ = 0.1`.
 - **Neighborhoods** (`lns2/neighborhood.rs`): collision-based, failure-based and random,
-  as in the paper, each returning distinct agents, at most `N`. Random walks and fill-up
-  loops give up after 64 failed attempts in a row and return fewer agents.
+  as in the paper, each returning distinct agents, at most `N`. The searches for more
+  agents are bounded and then return fewer: the fill-up loops after 64 failed draws in
+  total, the walk on the collision graph after `64 N` revisits, and each random walk from
+  a path after as many steps as the graph has vertices.
 - **Counting.** The collision graph comes from `conflicts` on the whole plan after every
   iteration, `O(m^2 T)`; fine at the sizes here, to be made incremental for hundreds of
   agents.

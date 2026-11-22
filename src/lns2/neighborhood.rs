@@ -23,7 +23,8 @@ use crate::graph::{Graph, Vertex};
 use crate::instance::AgentId;
 use crate::path::{Time, position_at};
 
-/// How often a method may fail to find a new agent in a row before it returns what it has.
+/// How often in total a fill-up loop may fail to find a new agent before it returns what
+/// it has; the walk on the collision graph may fail this many times per agent wanted.
 const ATTEMPTS: usize = 64;
 
 /// A neighborhood selection method.
