@@ -4,7 +4,7 @@
 //! report the same cost whenever more than one of them solves the instance within its
 //! budget. CBS-TA runs on the same agents with every agent's goal as a candidate of every
 //! agent: its plan must end each agent at a distinct one, and cost no more than CBS's. ECBS,
-//! PBS and LNS2 must return valid plans. Blocked cells are vertices without edges, so an agent whose start is its goal
+//! PBS, LNS2 and PIBT must return valid plans. Blocked cells are vertices without edges, so an agent whose start is its goal
 //! may wait on a blocked cell. Instances stay at the scale of the property tests, so budgets stay small.
 
 #![no_main]
@@ -13,7 +13,7 @@
 use libfuzzer_sys::fuzz_target;
 use mapf_search::{
     Agent, Grid, Instance, Limits, Lns2Config, MapfResult, Objective, TaskAgent, TaskInstance,
-    Weight, cbs, cbs_ta, ecbs, epea, first_conflict, icts, lns2, mstar, pbs,
+    Weight, cbs, cbs_ta, ecbs, epea, first_conflict, icts, lns2, mstar, pbs, pibt,
 };
 
 /// The most columns and rows a fuzzed grid has.
@@ -181,4 +181,5 @@ fuzz_target!(|data: &[u8]| {
         ..Lns2Config::default()
     };
     assert_valid(&instance, &lns2(&instance, config, budget()), "lns2");
+    assert_valid(&instance, &pibt(&instance, budget()), "pibt");
 });

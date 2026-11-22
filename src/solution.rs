@@ -43,8 +43,8 @@ impl Solution {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome {
     /// A conflict-free solution. Its quality is what the solver guarantees: optimal for
-    /// CBS, CBS-TA, ICTS, M* and EPEA*, within the suboptimality factor for ECBS, none for PBS
-    /// and LNS2.
+    /// CBS, CBS-TA, ICTS, M* and EPEA*, within the suboptimality factor for ECBS, none for PBS,
+    /// PIBT and LNS2.
     Solved(Solution),
     /// Proven unsolvable: an agent cannot reach its goal even alone, or a complete solver
     /// ran out of options.

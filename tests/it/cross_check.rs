@@ -160,6 +160,7 @@ proptest! {
             Solver::Ecbs(objective, Weight::ONE),
             Solver::Pbs(objective),
             Solver::Lns2(objective),
+            Solver::Pibt(objective),
         ];
 
         agree(&grid, &agents, objective, &optimal, &others)?;
