@@ -1,8 +1,8 @@
 # mapf-search design
 
 Multi-agent pathfinding (MAPF): find one path per agent so that no two agents collide,
-minimizing a joint objective. This crate hosts the conflict-based family (CBS, ECBS,
-MO-CBS), ICTS, PBS and M*; CBS-TA, MAPF-LNS2 and EPEA* are on the roadmap.
+minimizing a joint objective. This crate hosts the conflict-based family (CBS, CBS-TA,
+ECBS, MO-CBS), ICTS, PBS and M*; MAPF-LNS2 and EPEA* are on the roadmap.
 
 These algorithms share the problem model, path conflicts, joint objectives, constraints
 and reservations, and the single-agent low-level search. They do **not** share one search
