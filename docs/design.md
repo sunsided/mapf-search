@@ -2,8 +2,8 @@
 
 Multi-agent pathfinding (MAPF): find one path per agent so that no two agents collide,
 minimizing a joint objective. This crate hosts the conflict-based family (CBS, CBS-TA,
-ECBS, MO-CBS), ICTS, PBS, PIBT and the turn-aware PIBT*_T, M*, EPEA* and MAPF-LNS2 (over
-SIPPS); FOCBS is on the roadmap.
+FOCBS, ECBS, MO-CBS), ICTS, PBS, PIBT and the turn-aware PIBT*_T, M*, EPEA* and MAPF-LNS2
+(over SIPPS).
 
 These algorithms share the problem model, path conflicts, joint objectives, constraints
 and reservations, and the single-agent low-level search. They do **not** share one search
@@ -48,8 +48,8 @@ engine with pluggable policies.
   is `sum(len_i - 1)`.
 - **Makespan**: `max_i T_i`.
 
-Every solver but LNS2, PIBT and PIBT*_T, which only seek a feasible plan, takes an `Objective`
-(`SumOfCosts` or `Makespan`). For CBS, both objectives
+Every solver but LNS2, PIBT and PIBT*_T, which only seek a feasible plan, and FOCBS, which
+minimizes the sum of costs, takes an `Objective` (`SumOfCosts` or `Makespan`). For CBS, both objectives
 use the same low level: each agent's path is the cheapest one under its constraints, so a CT node's makespan is
 a lower bound on the makespan of every solution below it, just as its SoC is for SoC.
 Ordering the CT by makespan is therefore makespan-optimal. Ties go to the lower SoC, but
@@ -283,7 +283,10 @@ budget implements `Budget<Stats>`.
 
 ## Shared result types
 
-Every solver returns a `MapfResult`: an `Outcome` and high-level `Stats`. `Outcome` is
+Every solver but FOCBS returns a `MapfResult`: an `Outcome` and high-level `Stats`. FOCBS
+returns a `UaResult`, whose `UaOutcome::Solved` carries the assigned agents' `Solution`
+and the unassigned agents' paths separately, so the sum of costs stays that of the agents
+with goals. `Outcome` is
 `Solved(Solution)`, `Unsolvable` (a proof), `LimitReached` (the budget stopped the run) or
 `Exhausted`. Only PBS returns `Exhausted`: it ran out of options, which proves nothing.
 
@@ -334,6 +337,72 @@ same statistics. The fuzz target runs CBS-TA with every agent allowed at every g
 checks the plan and that it costs no more than CBS's. The benchmark runs it on the
 eight-agent instance with all goals shared: about 53 µs (bench profile, shared machine),
 against about 1.1 ms for `cbs` on the fixed assignment.
+
+## FOCBS (Jin et al. 2026)
+
+`focbs(instance, budget)` and `focbs_with(instance, config, budget)` solve a `UaInstance`
+(MAPF with unassigned agents, MAPF-UA): assigned agents have a start and a goal,
+unassigned ones only a start; they may end anywhere but must not collide with anyone.
+Starts are distinct over all agents. The objective is the assigned agents' sum of costs
+(the paper's sum of service time, last arrivals with goal-stay); the unassigned agents'
+moves (SMU) are minimized second, for the chosen assigned paths, and counted only up to the
+latest assigned arrival `T`, after which nobody moves. Only sum of costs: `focbs_with`
+panics on `Objective::Makespan`.
+
+- **High level.** The CBS `Search` over the assigned agents, every `CbsConfig` improvement
+  included. A third hook next to CBS-TA's forest: at a conflict-free node the budget is
+  asked, then the flow oracle routes the unassigned agents. If it succeeds, the node is the
+  solution; if not, the node is expanded by *flow-conflict branching*: one child per
+  blocker, adding a negative vertex or edge constraint on its assigned agent, through the
+  same `child` as a CBS split. Blockers at step 0 (fixed by the starts) and constraints the
+  node already has are skipped; without any other blocker the node is dropped. The paper's
+  Lemma 2: every feasible plan below the node releases one of the blockers, so the split
+  loses nothing; children may overlap.
+- **Flow oracle** (`flow.rs`). A time-expanded network over steps `0..=T`: each `(v, t)` is
+  a unit arc `v_t^in -> v_t^out`, waits are free arcs to `v_{t+1}^in`, and each vertex pair
+  joined by an edge has a gadget per step whose central arc has capacity 1 and cost 1 (a
+  move counts once, and two agents cannot swap along the edge). The source feeds the
+  unassigned starts at step 0, and every vertex at step `T` drains into the sink. The
+  assigned agents' reservations (their vertex at every step up to `T`, goal waits included,
+  and the central arc of each of their moves) have capacity 0 and carry a label naming the
+  agent. Successive shortest paths with Dijkstra on reduced costs sends one unit per
+  unassigned agent at the least total cost; the units are followed back into paths.
+- **One network for both jobs.** The paper routes on a network without the reservations
+  and computes the cut on a second, diagnostic one where they are labelled zero-capacity
+  arcs. Here the routing network already is the diagnostic one: zero-capacity arcs carry no
+  flow, and successive shortest paths that stops short of `m` units has reached a maximum
+  flow, so the nodes the source reaches in the residual network give a minimum cut. Its
+  labelled arcs are the blockers.
+- **Directed graphs.** The paper assumes an undirected graph. Here a gadget's entry arcs
+  exist only from an end with an edge to the other end, and its exit arcs only into an end
+  the other has an edge to.
+
+### Paper comparison
+
+| Paper (Jin et al. 2026, arXiv:2611.24108v1) | Here | Status |
+| --- | --- | --- |
+| MAPF-UA: assigned and unassigned agents, SST first, SMU second, sequential optimality (Def. 2) | the same; SST is the goal-stay sum of costs | same |
+| CBS over the assigned agents, ordered by SST | the CBS `Search`, with every `CbsConfig` improvement | beyond the paper |
+| Flow oracle: time-expanded network to `T_N`, vertex split, 5-arc edge gadget, min-cost flow | the same network | same |
+| BZ-SSP: zero-cost wait paths first, then SSP | plain successive shortest paths | simpler, slower |
+| Ordinary network for routing, diagnostic network for the cut | one network serving both | same result |
+| Flow-conflict branching on min-cut blockers, skipping `t = 0` and already forbidden ones | the same | same |
+| Start-avoiding tie-breaks (CT key and low-level key) | not implemented | missing; affects SMU only |
+| Undirected graphs | directed graphs too | generalized |
+
+### Tests and measurements
+
+A property test compares FOCBS (plain and improved) on random grids up to 3x3 with up to
+three agents, one or two of them assigned, against a joint Dijkstra over all agents with
+goal-stay pricing: the same assigned sum of costs, a conflict-free plan, and an unassigned
+routing whose number of moves equals a separate brute force over the returned assigned
+paths. Branching is rare in random cases (a few in 256), so a fixed case requires it: an
+idle robot on the goal at the end of a corridor with a pocket, where the conflict-free
+path alone costs 2 and the answer is 3. Further tests: no unassigned agents (the same
+outcome and statistics as `cbs_with`), no agents at all, a one-way ring, and makespan
+rejected. The fuzz target runs FOCBS with the last agent left without its goal. On the
+benchmark's eight-agent instance with the last two agents idle it takes about 0.8 ms
+(bench profile, noisy machine).
 
 ## ECBS (Barer et al. 2014)
 
@@ -951,11 +1020,6 @@ about 2-4 s with SIPPS and 30 s with the space-time A* (shared machine, noisy), 
 A* run was stopped after 9 minutes. On sparse instances SIPPS's interval bookkeeping
 makes it up to about twice as slow per call as A*, at a few microseconds.
 
-## Later algorithms
-
-- **FOCBS** (Jin et al., arXiv:2611.24108): CBS over the agents with goals and a min-cost
-  flow oracle for the agents without, which CBS-TA cannot express yet (issue #11).
-
 ## Benchmarks: Moving AI format
 
 Support the grid benchmarks of Stern et al. (2019), <https://movingai.com/benchmarks/mapf/>:
@@ -1040,7 +1104,7 @@ lower bound on 4-connected grids. Moves stay 4-connected, as in the MAPF benchma
 
 ## Roadmap
 
-FOCBS (unassigned agents).
+Nothing is planned at the moment.
 
 ## Cross-crate needs
 
@@ -1163,6 +1227,8 @@ level cannot yet (see ECBS).
 - K. Okumura, M. Machida, X. Défago, Y. Tamura. Priority inheritance with backtracking
   for iterative multi-agent path finding. IJCAI 2019; extended in arXiv:1901.11282v5,
   2022. (PIBT)
+- X. Jin, C. Qian, R. Zhang, G. Wu, X. Li, J. Jiang, W. Shang. Asymmetric decomposition
+  for multi-agent path finding with unassigned agents. arXiv:2611.24108v1, 2026. (FOCBS)
 - Z. Tao, C. Yu, Y. Hu. Scalable iterative multi-agent path finding under turn
   constraints. arXiv:2611.23911v1, 2026; reference code https://github.com/tzy82065/PIBTT2
   (MIT). (PIBT*_T)

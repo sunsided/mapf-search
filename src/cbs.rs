@@ -31,6 +31,7 @@ mod cover;
 mod heuristic;
 mod pairs;
 mod ta;
+mod ua;
 
 use alloc::collections::{BTreeMap, BinaryHeap};
 use alloc::rc::Rc;
@@ -44,6 +45,7 @@ use heuristic_search::{Budget, Stats};
 use self::cardinal::{Cardinality, cardinality, forced};
 use self::heuristic::PairKey;
 pub use self::ta::{cbs_ta, cbs_ta_with};
+pub use self::ua::{UaOutcome, UaResult, UaSolution, focbs, focbs_with};
 use crate::assignment::{Assignment, Ranked};
 use crate::conflict::{Conflict, conflicts};
 use crate::conflict_table::ConflictTable;
@@ -387,6 +389,9 @@ struct Search<'a, G> {
     /// CBS-TA's assignments not yet opened as trees, cheapest first; `None` for CBS,
     /// which has its single tree from the start.
     ranked: Option<Ranked<'a>>,
+    /// FOCBS's agents without goals, routed around every conflict-free node; `None` for
+    /// CBS and CBS-TA.
+    unassigned: Option<ua::Unassigned>,
     /// What the search minimizes and how.
     config: CbsConfig,
     /// The open nodes.
@@ -431,6 +436,7 @@ impl<'a, G: Graph> Search<'a, G> {
             goals,
             trees: Vec::new(),
             ranked,
+            unassigned: None,
             config,
             open: BinaryHeap::new(),
             pair_weights: RefCell::new(BTreeMap::new()),
@@ -460,13 +466,18 @@ impl<'a, G: Graph> Search<'a, G> {
                 break;
             };
 
-            let Some(conflict) = node.conflict else {
-                return Outcome::Solved(Solution::new(node.paths));
-            };
-
-            if budget.exhausted(&self.stats) {
+            if budget.exhausted(&self.stats) && !self.is_final(&node) {
                 return Outcome::LimitReached;
             }
+
+            let Some(conflict) = node.conflict else {
+                match self.route_unassigned(&node) {
+                    Some(blockers) => self.expand_blockers(&node, &blockers),
+                    None => return Outcome::Solved(Solution::new(node.paths)),
+                }
+
+                continue;
+            };
 
             self.expand(node, conflict);
         }
