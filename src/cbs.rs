@@ -30,6 +30,7 @@ mod cardinal;
 mod cover;
 mod heuristic;
 mod pairs;
+mod ta;
 
 use alloc::collections::{BTreeMap, BinaryHeap};
 use alloc::rc::Rc;
@@ -42,11 +43,13 @@ use heuristic_search::{Budget, Stats};
 
 use self::cardinal::{Cardinality, cardinality, forced};
 use self::heuristic::PairKey;
+pub use self::ta::{cbs_ta, cbs_ta_with};
+use crate::assignment::{Assignment, Ranked};
 use crate::conflict::{Conflict, conflicts};
 use crate::conflict_table::ConflictTable;
 use crate::constraint::{Constraint, ConstraintSet};
-use crate::graph::Graph;
-use crate::instance::{AgentId, Instance};
+use crate::graph::{Graph, Vertex};
+use crate::instance::{Agent, AgentId, Instance};
 use crate::low_level::{distance_tables, plan, plan_avoiding};
 use crate::mdd::Mdd;
 use crate::path::{Objective, Path, makespan, path_cost, sum_of_costs};
@@ -315,6 +318,8 @@ pub fn cbs_with<G: Graph>(
 /// One constraint-tree node.
 #[derive(Clone)]
 struct Node {
+    /// The constraint tree the node belongs to: an index into [`Search::trees`].
+    tree: usize,
     /// All constraints on the way from the root, on any agent.
     constraints: Vec<Constraint>,
     /// One path per agent, optimal under its constraints.
@@ -365,14 +370,25 @@ impl Ord for Entry {
     }
 }
 
-/// The state of one CBS run.
+/// The state of one CBS run: one constraint tree, or for CBS-TA a forest of them, one per
+/// agent-to-goal assignment.
 struct Search<'a, G> {
-    /// The instance being solved.
-    instance: &'a Instance<G>,
+    /// The graph the agents move on.
+    graph: &'a G,
+    /// The start of each agent, indexed by agent.
+    starts: Vec<Vertex>,
+    /// The candidate goals, indexed by goal; an assignment picks one per agent.
+    goals: Vec<Vertex>,
+    /// Distances to each goal, indexed by goal like [`Search::goals`].
+    distances: Vec<Vec<Option<u32>>>,
+    /// The assignment of each constraint tree opened so far, indexed by
+    /// [`Node::tree`]: the goal of each agent.
+    trees: Vec<Assignment>,
+    /// CBS-TA's assignments not yet opened as trees, cheapest first; `None` for CBS,
+    /// which has its single tree from the start.
+    ranked: Option<Ranked<'a>>,
     /// What the search minimizes and how.
     config: CbsConfig,
-    /// Distances to each agent's goal, indexed by agent.
-    distances: Vec<Vec<Option<u32>>>,
     /// The open nodes.
     open: BinaryHeap<Entry>,
     /// WDG's pair weights by the pair's constraints; `None` for a pair without a joint plan.
@@ -382,12 +398,40 @@ struct Search<'a, G> {
 }
 
 impl<'a, G: Graph> Search<'a, G> {
-    /// Prepares a run: computes the distance tables.
+    /// Prepares a CBS run on `instance`: one tree, agent `i` assigned goal `i`.
     fn new(instance: &'a Instance<G>, config: CbsConfig) -> Self {
-        Self {
-            instance,
+        let agents = instance.agents();
+        let mut search = Self::forest(
+            instance.graph(),
+            agents.iter().map(|agent| agent.start).collect(),
+            agents.iter().map(|agent| agent.goal).collect(),
+            distance_tables(instance.graph(), agents),
+            None,
             config,
-            distances: distance_tables(instance.graph(), instance.agents()),
+        );
+        search.trees.push((0..agents.len()).collect());
+
+        search
+    }
+
+    /// Prepares a run without trees from `starts` to `goals`, with the `distances` to each
+    /// goal. Trees come from `ranked`, or must be added to [`Search::trees`].
+    fn forest(
+        graph: &'a G,
+        starts: Vec<Vertex>,
+        goals: Vec<Vertex>,
+        distances: Vec<Vec<Option<u32>>>,
+        ranked: Option<Ranked<'a>>,
+        config: CbsConfig,
+    ) -> Self {
+        Self {
+            graph,
+            starts,
+            distances,
+            goals,
+            trees: Vec::new(),
+            ranked,
+            config,
             open: BinaryHeap::new(),
             pair_weights: RefCell::new(BTreeMap::new()),
             stats: Stats::default(),
@@ -396,18 +440,26 @@ impl<'a, G: Graph> Search<'a, G> {
 
     /// Runs the high-level search to its end.
     fn run(&mut self, budget: &mut impl Budget<Stats>) -> Outcome {
-        let Some(root) = self.root() else {
-            return Outcome::Unsolvable;
-        };
+        if self.ranked.is_none() {
+            let Some(root) = self.root(0) else {
+                return Outcome::Unsolvable;
+            };
 
-        self.push(root);
+            self.push(root);
+        }
 
         self.run_open(budget)
     }
 
-    /// Pops and expands open nodes until a solution, the budget or an empty open list.
+    /// Pops and expands open nodes until a solution, the budget or an empty open list,
+    /// opening CBS-TA's trees as they become due.
     fn run_open(&mut self, budget: &mut impl Budget<Stats>) -> Outcome {
-        while let Some(Entry { node, .. }) = self.open.pop() {
+        loop {
+            self.open_due_trees();
+            let Some(Entry { node, .. }) = self.open.pop() else {
+                break;
+            };
+
             let Some(conflict) = node.conflict else {
                 return Outcome::Solved(Solution::new(node.paths));
             };
@@ -422,18 +474,56 @@ impl<'a, G: Graph> Search<'a, G> {
         Outcome::Unsolvable
     }
 
-    /// The root node: every agent planned without constraints, avoiding the earlier
-    /// agents' paths if [`CbsConfig::conflict_avoidance`] is on. `None` if one of them has
-    /// no path.
-    fn root(&self) -> Option<Node> {
-        let agents = self.instance.agents().len();
+    /// Opens the root of every ranked assignment that is cheaper, by the objective, than
+    /// the best open node, or every one while nothing is open.
+    ///
+    /// An assignment's cost is that of its root without heuristic, a lower bound on every
+    /// node of its tree, so the trees still closed cannot hold anything better than the
+    /// node popped next. This opens no more trees than CBS-TA's rule of opening the next
+    /// one whenever a root is expanded.
+    fn open_due_trees(&mut self) {
+        while let Some(cost) = self.ranked.as_ref().and_then(Ranked::peek) {
+            if self
+                .open
+                .peek()
+                .is_some_and(|best| u64::from(best.key.0) <= cost.0)
+            {
+                return;
+            }
+
+            let assignment = self.ranked.as_mut().and_then(Ranked::next).expect("peeked");
+            self.trees.push(assignment);
+            if let Some(root) = self.root(self.trees.len() - 1) {
+                self.push(root);
+            }
+        }
+    }
+
+    /// The root node of `tree`: every agent planned without constraints, avoiding the
+    /// earlier agents' paths if [`CbsConfig::conflict_avoidance`] is on. `None` if one of
+    /// them has no path.
+    fn root(&self, tree: usize) -> Option<Node> {
+        let agents = self.starts.len();
         let mut paths = Vec::with_capacity(agents);
         for agent in 0..agents {
-            let path = self.replan(agent, &[], &paths)?;
+            let path = self.replan(tree, agent, &[], &paths)?;
             paths.push(path);
         }
 
-        self.node(Vec::new(), paths, vec![None; agents])
+        self.node(tree, Vec::new(), paths, vec![None; agents])
+    }
+
+    /// The start and the assigned goal of `agent` in `tree`.
+    fn agent(&self, tree: usize, agent: AgentId) -> Agent {
+        Agent {
+            start: self.starts[agent],
+            goal: self.goals[self.trees[tree][agent]],
+        }
+    }
+
+    /// The distances to the assigned goal of `agent` in `tree`.
+    fn distances(&self, tree: usize, agent: AgentId) -> &[Option<u32>] {
+        &self.distances[self.trees[tree][agent]]
     }
 
     /// Splits `conflict` of `parent`: bypasses it if a child allows, else opens the
@@ -479,7 +569,7 @@ impl<'a, G: Graph> Search<'a, G> {
             paths[agent].clone_from(&child.node.paths[agent]);
         }
 
-        self.node(parent.constraints, paths, parent.mdds)
+        self.node(parent.tree, parent.constraints, paths, parent.mdds)
     }
 
     /// The child of `parent` with `constraint` added, or `None` if an agent it replans has
@@ -496,23 +586,29 @@ impl<'a, G: Graph> Search<'a, G> {
         let mut paths = parent.paths.clone();
         let mut mdds = parent.mdds.clone();
         for &agent in &replanned {
-            paths[agent] = self.replan(agent, &constraints, &paths)?;
+            paths[agent] = self.replan(parent.tree, agent, &constraints, &paths)?;
             mdds[agent] = None;
         }
 
         mdds[constraint.agent()] = None;
-        let node = self.node(constraints, paths, mdds)?;
+        let node = self.node(parent.tree, constraints, paths, mdds)?;
 
         Some(Child { node, replanned })
     }
 
-    /// The cheapest path of `agent` under those of `constraints` that name it; with
-    /// [`CbsConfig::conflict_avoidance`], one with the fewest conflicts with `paths`
+    /// The cheapest path of `agent` in `tree` under those of `constraints` that name it;
+    /// with [`CbsConfig::conflict_avoidance`], one with the fewest conflicts with `paths`
     /// (indexed by agent; may be a prefix, and may include `agent`) among the cheapest.
-    fn replan(&self, agent: AgentId, constraints: &[Constraint], paths: &[Path]) -> Option<Path> {
+    fn replan(
+        &self,
+        tree: usize,
+        agent: AgentId,
+        constraints: &[Constraint],
+        paths: &[Path],
+    ) -> Option<Path> {
         let set = ConstraintSet::for_agent(agent, constraints);
-        let (graph, distances) = (self.instance.graph(), &self.distances[agent]);
-        let start_and_goal = self.instance.agents()[agent];
+        let (graph, distances) = (self.graph, self.distances(tree, agent));
+        let start_and_goal = self.agent(tree, agent);
 
         if self.config.conflict_avoidance {
             let table = ConflictTable::without(paths, agent);
@@ -522,26 +618,28 @@ impl<'a, G: Graph> Search<'a, G> {
         }
     }
 
-    /// A node with `constraints`, `paths` and the known `mdds`: computes its costs, its
-    /// conflicts, the missing MDDs it needs, the conflict to split and the heuristic.
-    /// `None` if the heuristic proves that the node has no solution.
+    /// A node of `tree` with `constraints`, `paths` and the known `mdds`: computes its
+    /// costs, its conflicts, the missing MDDs it needs, the conflict to split and the
+    /// heuristic. `None` if the heuristic proves that the node has no solution.
     fn node(
         &self,
+        tree: usize,
         constraints: Vec<Constraint>,
         paths: Vec<Path>,
         mut mdds: Vec<Option<Rc<Mdd>>>,
     ) -> Option<Node> {
         let found = conflicts(&paths);
         let (conflict, heuristic) = if self.config.needs_mdds() {
-            self.fill_mdds(&constraints, &paths, &mut mdds, &found);
+            self.fill_mdds(tree, &constraints, &paths, &mut mdds, &found);
             let classes: Vec<Cardinality> = found.iter().map(|c| cardinality(c, &mdds)).collect();
-            let heuristic = self.heuristic(&constraints, &paths, &found, &classes, &mdds)?;
+            let heuristic = self.heuristic(tree, &constraints, &paths, &found, &classes, &mdds)?;
             (self.choose(&found, &classes), heuristic)
         } else {
             (found.first().copied(), 0)
         };
 
         Some(Node {
+            tree,
             sum_of_costs: sum_of_costs(&paths),
             makespan: makespan(&paths),
             conflict,
@@ -553,9 +651,10 @@ impl<'a, G: Graph> Search<'a, G> {
         })
     }
 
-    /// Builds the missing MDDs of the agents in `found`.
+    /// Builds the missing MDDs of the agents in `found`, in `tree`.
     fn fill_mdds(
         &self,
+        tree: usize,
         constraints: &[Constraint],
         paths: &[Path],
         mdds: &mut [Option<Rc<Mdd>>],
@@ -570,10 +669,10 @@ impl<'a, G: Graph> Search<'a, G> {
 
                 let set = ConstraintSet::for_agent(agent, constraints);
                 let mdd = Mdd::build(
-                    self.instance.graph(),
-                    self.instance.agents()[agent],
+                    self.graph,
+                    self.agent(tree, agent),
                     &set,
-                    &self.distances[agent],
+                    self.distances(tree, agent),
                     path_cost(&paths[agent]),
                 )
                 .expect("the agent's own path is in its MDD");
@@ -699,13 +798,13 @@ mod tests {
             &[((0, 1), (2, 1)), ((1, 0), (1, 2))],
         );
         let search = Search::new(&plus, CbsConfig::improved(Objective::SumOfCosts));
-        let root = search.root().expect("both reach their goals");
+        let root = search.root(0).expect("both reach their goals");
 
         assert_eq!(root.heuristic, 1);
         assert_eq!(root.sum_of_costs, 4);
 
         let plain = Search::new(&plus, CbsConfig::plain(Objective::SumOfCosts));
-        assert_eq!(plain.root().expect("reachable").heuristic, 0);
+        assert_eq!(plain.root(0).expect("reachable").heuristic, 0);
     }
 
     /// Prioritizing picks a later cardinal conflict over an earlier non-cardinal one;
@@ -736,7 +835,7 @@ mod tests {
         let classes = found.map(|conflict| cardinality(&conflict, &mdds));
         let heuristic = |search: &Search<'_, Grid>| {
             let (constraints, paths) = (Vec::new(), Vec::new());
-            search.heuristic(&constraints, &paths, &found, &classes, &mdds)
+            search.heuristic(0, &constraints, &paths, &found, &classes, &mdds)
         };
 
         assert_eq!(improved.choose(&found, &classes), Some(forced));
@@ -756,7 +855,7 @@ mod tests {
         let mut config = CbsConfig::plain(Objective::SumOfCosts);
         config.bypass = true;
         let mut search = Search::new(&open, config);
-        let root = search.root().expect("reachable");
+        let root = search.root(0).expect("reachable");
         let conflict = root.conflict.expect("the diagonal paths meet");
 
         search.expand(root, conflict);
