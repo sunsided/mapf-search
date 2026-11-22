@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0](https://github.com/sunsided/mapf-search/compare/v0.2.0...v0.3.0) - 2026-11-22
+
+### Added
+
+- Add PIBT*_T for agents that need time to turn
+- Add FOCBS for agents without goals
+
+### Changed
+
+- Link the crate to its page on the planning and search site
+- Name the reversed roles of the PIBT*_T swap test
+- Treat a FOCBS run without unassigned agents as plain CBS at the budget
+
+### Fixed
+
+- Fix PIBT*_T and ICTS failures and rescan only changed agents in CBS ([#19](https://github.com/sunsided/mapf-search/pull/19))
+- Fix PIBT*_T and ICTS failures and rescan only changed agents in CBS
+
 ## [0.2.0](https://github.com/sunsided/mapf-search/compare/v0.1.0...v0.2.0) - 2026-11-22
 
 ### Added
