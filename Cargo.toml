@@ -7,6 +7,7 @@ rust-version = "1.86"
 authors = ["Markus Mayer <widemeadows@gmail.com>"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/sunsided/mapf-search"
+homepage = "https://sunsided.github.io/planning-and-search/crates/mapf-search/"
 readme = "README.md"
 keywords = ["mapf", "multi-agent", "pathfinding", "cbs", "robotics"]
 categories = ["algorithms", "science::robotics", "game-development", "no-std"]
