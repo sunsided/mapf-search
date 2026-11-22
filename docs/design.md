@@ -2,7 +2,8 @@
 
 Multi-agent pathfinding (MAPF): find one path per agent so that no two agents collide,
 minimizing a joint objective. This crate hosts the conflict-based family (CBS, CBS-TA,
-ECBS, MO-CBS), ICTS, PBS, M* and EPEA*; MAPF-LNS2 is on the roadmap.
+ECBS, MO-CBS), ICTS, PBS, M*, EPEA* and MAPF-LNS2; SIPPS, a faster low level for
+MAPF-LNS2, is on the roadmap.
 
 These algorithms share the problem model, path conflicts, joint objectives, constraints
 and reservations, and the single-agent low-level search. They do **not** share one search
@@ -47,7 +48,8 @@ engine with pluggable policies.
   is `sum(len_i - 1)`.
 - **Makespan**: `max_i T_i`.
 
-Every solver takes an `Objective` (`SumOfCosts` or `Makespan`). For CBS, both objectives
+Every solver but LNS2, which only seeks a feasible plan, takes an `Objective` (`SumOfCosts`
+or `Makespan`). For CBS, both objectives
 use the same low level: each agent's path is the cheapest one under its constraints, so a CT node's makespan is
 a lower bound on the makespan of every solution below it, just as its SoC is for SoC.
 Ordering the CT by makespan is therefore makespan-optimal. Ties go to the lower SoC, but
@@ -755,13 +757,70 @@ built, so the checks inside the low level see completed expansions only and
   -tn, and 6 ms and 126 expansions for the improved configuration, feasibility check
   included.
 
+## MAPF-LNS2 (Li et al. 2022)
+
+`lns2(instance, config, budget)` repairs a plan with collisions until it has none.
+`Lns2Config` holds the neighborhood size `N` (default 8, the paper's) and a seed; every
+random choice comes from a local SplitMix64 generator (`lns2/random.rs`), so a run is
+reproducible and the crate stays `no_std` without a dependency. LNS2 has no quality
+guarantee and is incomplete: on an unsolvable instance it runs until its budget, and some
+solvable ones are local minima it never leaves (two agents swapping through a side pocket:
+whichever agent is planned first takes the straight path, and neither can then avoid the
+other alone). It returns `Unsolvable` only for a goal unreachable even alone.
+
+- **Initial plan.** Prioritized planning in a random order, each agent with the fewest
+  collisions with the agents before it. Where an agent can avoid them all, this is the
+  shortest collision-free path that PP with SIPP would find; where it cannot, it is the
+  paper's fallback of planning the rest with the fewest collisions.
+- **Low level** (`lns2/low_level.rs`). Space-time A* over `(vertex, time, finished)` with
+  search-core's `Lexicographic` cost: collisions with the other paths (the shared
+  `ConflictTable`: vertices, parked agents, swaps; finishing counts the later visits of
+  the goal), then time steps. The horizon is the end of the longest other path plus the
+  vertex count; after it nothing moves, and a simple path reaches the goal with no more
+  collisions than a longer one.
+- **Iteration.** A method is drawn by its adaptive weight, builds a neighborhood, and the
+  neighborhood is replanned by prioritized planning in a random order against every other
+  current path. The new plan is kept if its number of colliding pairs did not grow. The
+  method's weight becomes `γ · max(0, c⁻ - c⁺) + (1 - γ) · w` with `γ = 0.1`.
+- **Neighborhoods** (`lns2/neighborhood.rs`): collision-based, failure-based and random,
+  as in the paper, each returning distinct agents, at most `N`. The searches for more
+  agents are bounded and then return fewer: the fill-up loops after 64 failed draws in
+  total, the walk on the collision graph after `64 N` revisits, and each random walk from
+  a path after as many steps as the graph has vertices.
+- **Counting.** The collision graph comes from `conflicts` on the whole plan after every
+  iteration, `O(m^2 T)`; fine at the sizes here, to be made incremental for hundreds of
+  agents.
+
+### Paper comparison
+
+| Paper (Li et al. 2022) | Here | Status |
+| --- | --- | --- |
+| Initial plan from a MAPF algorithm (PP), the rest planned with fewest collisions | PP where every agent takes its fewest-collision path | same result |
+| SIPPS low level (soft obstacles, safe intervals) | space-time A* with (collisions, time) cost, the paper's Experiment 1 baseline | slower per call, follow-up |
+| Replan the neighborhood with PP in a random order | the same | same |
+| Accept if the colliding pairs do not grow | the same | same |
+| Collision-based, failure-based and random neighborhoods | the same | same |
+| ALNS with reaction factor `γ = 0.1`, weights start at 1 | the same; all-zero weights fall back to a uniform pick | same |
+| `N = 8` | `Lns2Config::default()` | same |
+| Stop when feasible, or at a time limit | stop when feasible, or at the `Budget` (iterations) | same |
+
+### Tests and measurements
+
+Unit tests cover the low level (detours, waiting out an agent, passing a parked agent when
+it must, finishing collisions), the generator, every neighborhood method (distinct, at
+most `N`, a colliding agent included where the method starts from one) and full runs on a
+crowded 5x5 grid with twelve agents, for several seeds and sizes: valid, and the same
+result for the same seed. LNS2 is one of the shared test solvers (hand-made cases, oracle
+property test, cross-check) with no guarantee and, in the tests, at most 500 iterations,
+and it runs in the solver fuzz target. On the benchmark instance the initial plan is
+already collision-free, so the benchmark (about 140 µs) measures prioritized planning.
+
 ## Later algorithms
 
-- **MAPF-LNS2** (Li et al. 2022): start from a plan with collisions (prioritized planning
-  with soft constraints), repeatedly pick a neighbourhood of agents, replan them with
-  SIPPS, keep the result if collisions drop. Needs SIPP (safe-interval path planning) as
-  a second low level; SIPP intervals are a different state space, so it is a local
-  module, not a heuristic-search adapter.
+- **SIPPS** (Li et al. 2022) as the low level of MAPF-LNS2: safe-interval path planning
+  with soft obstacles, about five times faster per call than the space-time A* used now.
+  SIPP intervals are a different state space, so it is a local module, not a
+  heuristic-search adapter.
 
 ## Benchmarks: Moving AI format
 
@@ -847,7 +906,7 @@ lower bound on 4-connected grids. Moves stay 4-connected, as in the MAPF benchma
 
 ## Roadmap
 
-SIPP and MAPF-LNS2.
+SIPP and SIPPS.
 
 ## Cross-crate needs
 

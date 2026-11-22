@@ -42,6 +42,16 @@ impl ConflictTable {
         table
     }
 
+    /// The table of `paths`, each non-empty.
+    pub(crate) fn of<'p>(paths: impl IntoIterator<Item = &'p Path>) -> Self {
+        let mut table = Self::default();
+        for path in paths {
+            table.add(path);
+        }
+
+        table
+    }
+
     /// Records `path`, which must not be empty.
     fn add(&mut self, path: &[Vertex]) {
         let last = path.len() - 1;

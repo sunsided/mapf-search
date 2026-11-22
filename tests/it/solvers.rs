@@ -4,8 +4,8 @@
 
 use heuristic_search::Limits;
 use mapf_search::{
-    AdjacencyList, Agent, CbsConfig, Graph, Grid, Instance, MStarConfig, MapfResult, Objective,
-    Outcome, Weight, cbs_with, ecbs, epea, icts, mstar_with, pbs,
+    AdjacencyList, Agent, CbsConfig, Graph, Grid, Instance, Lns2Config, MStarConfig, MapfResult,
+    Objective, Outcome, Weight, cbs_with, ecbs, epea, icts, lns2, mstar_with, pbs,
 };
 
 use crate::oracle::{assert_valid_plan, optimal_cost};
@@ -25,6 +25,9 @@ pub enum Solver {
     MStar(MStarConfig),
     /// EPEA*; optimal for its objective.
     Epea(Objective),
+    /// MAPF-LNS2 with its default configuration; no guarantee, incomplete. It optimizes
+    /// nothing; the objective is the one its plans are checked against.
+    Lns2(Objective),
 }
 
 impl Solver {
@@ -37,7 +40,7 @@ impl Solver {
     }
 
     /// Every solver in a representative configuration, for `objective`.
-    pub fn all_for(objective: Objective) -> [Self; 9] {
+    pub fn all_for(objective: Objective) -> [Self; 10] {
         [
             Self::Cbs(CbsConfig::plain(objective)),
             Self::Cbs(CbsConfig::improved(objective)),
@@ -48,6 +51,7 @@ impl Solver {
             Self::MStar(MStarConfig::recursive(objective)),
             Self::MStar(MStarConfig::od_recursive(objective)),
             Self::Epea(objective),
+            Self::Lns2(objective),
         ]
     }
 
@@ -61,6 +65,13 @@ impl Solver {
             Self::Icts(objective) => icts(instance, objective, limits),
             Self::MStar(config) => mstar_with(instance, config, limits),
             Self::Epea(objective) => epea(instance, objective, limits),
+            // LNS2 that has not repaired a tiny instance in 500 iterations is stuck in a
+            // local minimum (such as two agents and a side pocket); more only costs time.
+            Self::Lns2(_) => lns2(
+                instance,
+                Lns2Config::default(),
+                Limits::expansions(budget.min(500)),
+            ),
         }
     }
 
@@ -72,7 +83,8 @@ impl Solver {
             Self::Ecbs(objective, _)
             | Self::Pbs(objective)
             | Self::Icts(objective)
-            | Self::Epea(objective) => objective,
+            | Self::Epea(objective)
+            | Self::Lns2(objective) => objective,
         }
     }
 
@@ -82,14 +94,14 @@ impl Solver {
         match self {
             Self::Cbs(_) | Self::Icts(_) | Self::MStar(_) | Self::Epea(_) => Some((1, 1)),
             Self::Ecbs(_, weight) => Some((weight.numerator(), weight.denominator())),
-            Self::Pbs(_) => None,
+            Self::Pbs(_) | Self::Lns2(_) => None,
         }
     }
 
     /// Returns `true` if the solver never gives up before its budget, so it returns
     /// `Solved` on every solvable instance given enough budget.
     pub fn is_complete(self) -> bool {
-        !matches!(self, Self::Pbs(_))
+        !matches!(self, Self::Pbs(_) | Self::Lns2(_))
     }
 }
 
