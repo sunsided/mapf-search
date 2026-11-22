@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 
 use heuristic_search::Stats;
 
-use crate::path::{Objective, Path, makespan, sum_of_costs};
+use crate::path::{Objective, Path, Time, makespan, sum_of_costs};
 
 /// A conflict-free plan: one path per agent.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,4 +76,30 @@ impl MapfResult {
             Outcome::Unsolvable | Outcome::LimitReached | Outcome::Exhausted => None,
         }
     }
+}
+
+/// The makespan-optimal plan of a solver that minimizes the sum of costs under a deadline:
+/// the unconstrained plan first, then one `search` under each deadline from `lower_bound`
+/// up to that plan's makespan, until one succeeds. The first plan that meets a deadline
+/// has the optimal makespan and, among such plans, the optimal sum of costs.
+///
+/// `search(None)` searches without a deadline; `search(Some(deadline))` requires every
+/// agent to finish by `deadline` and is [`Outcome::Unsolvable`] if none can.
+pub(crate) fn makespan_by_deadlines(
+    lower_bound: Time,
+    mut search: impl FnMut(Option<Time>) -> Outcome,
+) -> Outcome {
+    let fallback = match search(None) {
+        Outcome::Solved(solution) => solution,
+        other => return other,
+    };
+
+    for deadline in lower_bound..fallback.makespan {
+        match search(Some(deadline)) {
+            Outcome::Unsolvable => {}
+            other => return other,
+        }
+    }
+
+    Outcome::Solved(fallback)
 }

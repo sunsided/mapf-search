@@ -549,7 +549,7 @@ impl<'a, G: Graph, F: Fn(AgentId, Vertex, Vertex) -> [u32; N], const N: usize> S
         constraints.push(constraint);
 
         let mut replanned = Vec::new();
-        for agent in split::affected(constraint, &node.paths) {
+        for agent in constraint.affected(&node.paths) {
             let set = self.replan(agent, &constraints)?;
             if set.is_empty() {
                 return Ok(None);

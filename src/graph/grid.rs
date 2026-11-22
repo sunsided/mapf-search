@@ -36,8 +36,8 @@ impl Grid {
 
     /// Parses a grid from rows of text: `.` is free, `@` is blocked.
     ///
-    /// All rows must have the same length. Moving AI maps use more symbols; their parser
-    /// is planned separately.
+    /// All rows must have the same length. Moving AI maps use more symbols; read them with
+    /// [`parse_map`](crate::parse_map).
     ///
     /// # Panics
     ///

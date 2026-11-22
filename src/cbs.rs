@@ -47,7 +47,7 @@ use self::heuristic::PairKey;
 pub use self::ta::{cbs_ta, cbs_ta_with};
 pub use self::ua::{UaOutcome, UaResult, UaSolution, focbs, focbs_with};
 use crate::assignment::{Assignment, Ranked};
-use crate::conflict::{Conflict, conflicts};
+use crate::conflict::{Conflict, conflicts, update_conflicts};
 use crate::conflict_table::ConflictTable;
 use crate::constraint::{Constraint, ConstraintSet};
 use crate::graph::{Graph, Vertex};
@@ -336,8 +336,9 @@ struct Node {
     makespan: u32,
     /// The conflict to split next; `None` if the paths are a solution.
     conflict: Option<Conflict>,
-    /// The number of conflicts among [`Node::paths`]; a tie-breaker.
-    conflict_count: usize,
+    /// Every conflict among [`Node::paths`], in the order of
+    /// [`first_conflict`](crate::first_conflict); its length is a tie-breaker.
+    conflicts: Vec<Conflict>,
     /// The heuristic value ([`CbsConfig::heuristic`]); `0` if off.
     heuristic: u32,
 }
@@ -521,7 +522,8 @@ impl<'a, G: Graph> Search<'a, G> {
             paths.push(path);
         }
 
-        self.node(tree, Vec::new(), paths, vec![None; agents])
+        let found = conflicts(&paths);
+        self.node(tree, Vec::new(), paths, found, vec![None; agents])
     }
 
     /// The start and the assigned goal of `agent` in `tree`.
@@ -580,7 +582,8 @@ impl<'a, G: Graph> Search<'a, G> {
             paths[agent].clone_from(&child.node.paths[agent]);
         }
 
-        self.node(parent.tree, parent.constraints, paths, parent.mdds)
+        let found = update_conflicts(&parent.conflicts, &paths, &child.replanned);
+        self.node(parent.tree, parent.constraints, paths, found, parent.mdds)
     }
 
     /// The child of `parent` with `constraint` added, or `None` if an agent it replans has
@@ -593,7 +596,7 @@ impl<'a, G: Graph> Search<'a, G> {
         let mut constraints = parent.constraints.clone();
         constraints.push(constraint);
 
-        let replanned = affected(constraint, &parent.paths);
+        let replanned = constraint.affected(&parent.paths);
         let mut paths = parent.paths.clone();
         let mut mdds = parent.mdds.clone();
         for &agent in &replanned {
@@ -602,7 +605,8 @@ impl<'a, G: Graph> Search<'a, G> {
         }
 
         mdds[constraint.agent()] = None;
-        let node = self.node(parent.tree, constraints, paths, mdds)?;
+        let found = update_conflicts(&parent.conflicts, &paths, &replanned);
+        let node = self.node(parent.tree, constraints, paths, found, mdds)?;
 
         Some(Child { node, replanned })
     }
@@ -629,17 +633,17 @@ impl<'a, G: Graph> Search<'a, G> {
         }
     }
 
-    /// A node of `tree` with `constraints`, `paths` and the known `mdds`: computes its
-    /// costs, its conflicts, the missing MDDs it needs, the conflict to split and the
+    /// A node of `tree` with `constraints`, `paths`, their conflicts `found` and the known
+    /// `mdds`: computes its costs, the missing MDDs it needs, the conflict to split and the
     /// heuristic. `None` if the heuristic proves that the node has no solution.
     fn node(
         &self,
         tree: usize,
         constraints: Vec<Constraint>,
         paths: Vec<Path>,
+        found: Vec<Conflict>,
         mut mdds: Vec<Option<Rc<Mdd>>>,
     ) -> Option<Node> {
-        let found = conflicts(&paths);
         let (conflict, heuristic) = if self.config.needs_mdds() {
             self.fill_mdds(tree, &constraints, &paths, &mut mdds, &found);
             let classes: Vec<Cardinality> = found.iter().map(|c| cardinality(c, &mdds)).collect();
@@ -654,7 +658,7 @@ impl<'a, G: Graph> Search<'a, G> {
             sum_of_costs: sum_of_costs(&paths),
             makespan: makespan(&paths),
             conflict,
-            conflict_count: found.len(),
+            conflicts: found,
             heuristic,
             constraints,
             paths,
@@ -715,7 +719,7 @@ impl<'a, G: Graph> Search<'a, G> {
             Objective::SumOfCosts => (soc + node.heuristic, makespan),
             Objective::Makespan => (makespan, soc),
         };
-        let key = (first, second, node.conflict_count, self.stats.generated);
+        let key = (first, second, node.conflicts.len(), self.stats.generated);
 
         self.stats.generated += 1;
         self.open.push(Entry { key, node });
@@ -739,26 +743,7 @@ fn is_bypass(parent: &Node, child: &Child) -> bool {
         .iter()
         .all(|&agent| path_cost(&child.node.paths[agent]) == path_cost(&parent.paths[agent]));
 
-    same_cost && child.node.conflict_count < parent.conflict_count
-}
-
-/// The agents whose paths in `paths` must be replanned once `constraint` is added: its own
-/// agent for a negative constraint, every other agent whose path breaks what a positive
-/// one implies for it.
-fn affected(constraint: Constraint, paths: &[Path]) -> Vec<AgentId> {
-    if !constraint.is_positive() {
-        return Vec::from([constraint.agent()]);
-    }
-
-    (0..paths.len())
-        .filter(|&agent| agent != constraint.agent())
-        .filter(|&agent| {
-            constraint
-                .implied_for(agent)
-                .iter()
-                .any(|implied| implied.is_violated_by(&paths[agent]))
-        })
-        .collect()
+    same_cost && child.node.conflicts.len() < parent.conflicts.len()
 }
 
 /// Which agent of `conflict` disjoint splitting constrains: `1` (the second) if only that
@@ -877,6 +862,6 @@ mod tests {
             node.constraints.is_empty(),
             "the parent keeps its constraints"
         );
-        assert_eq!((node.sum_of_costs, node.conflict_count), (8, 0));
+        assert_eq!((node.sum_of_costs, node.conflicts.len()), (8, 0));
     }
 }

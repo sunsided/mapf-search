@@ -67,9 +67,9 @@ use self::planner::Planner;
 use self::state::Key;
 use crate::graph::{Graph, Vertex};
 use crate::instance::Instance;
-use crate::low_level::distance_tables;
-use crate::path::{Objective, Path, Time};
-use crate::solution::{MapfResult, Outcome, Solution};
+use crate::low_level::{distance_tables, makespan_lower_bound};
+use crate::path::{Objective, Path, Time, trim_trailing_waits};
+use crate::solution::{MapfResult, Outcome, Solution, makespan_by_deadlines};
 
 /// What [`mstar_with`] optimizes and which form of M* it runs.
 ///
@@ -223,7 +223,10 @@ pub fn mstar_with<G: Graph>(
 
     let outcome = match config.objective {
         Objective::SumOfCosts => run.search(None, &mut budget),
-        Objective::Makespan => run.makespan(&mut budget),
+        Objective::Makespan => {
+            let lower_bound = makespan_lower_bound(instance.agents(), &run.distances);
+            makespan_by_deadlines(lower_bound, |deadline| run.search(deadline, &mut budget))
+        }
     };
 
     MapfResult {
@@ -247,33 +250,6 @@ struct Run<'a, G> {
 }
 
 impl<G: Graph> Run<'_, G> {
-    /// The makespan-optimal plan, as described in the module docs: the sum-of-costs plan
-    /// first, then sum-of-costs searches under ever later deadlines from the lower bound
-    /// on, until one succeeds or the deadline reaches that plan's makespan.
-    fn makespan(&mut self, budget: &mut impl Budget<Stats>) -> Outcome {
-        let fallback = match self.search(None, budget) {
-            Outcome::Solved(solution) => solution,
-            other => return other,
-        };
-
-        let lower_bound = self
-            .instance
-            .agents()
-            .iter()
-            .zip(&self.distances)
-            .filter_map(|(agent, distances)| distances[agent.start])
-            .max()
-            .unwrap_or(0);
-        for deadline in lower_bound..fallback.makespan {
-            match self.search(Some(deadline), budget) {
-                Outcome::Unsolvable => {}
-                other => return other,
-            }
-        }
-
-        Outcome::Solved(fallback)
-    }
-
     /// One search for the plan with the optimal sum of costs among those in which every
     /// agent finishes by `deadline` (any time if `None`).
     fn search(&mut self, deadline: Option<Time>, budget: &mut impl Budget<Stats>) -> Outcome {
@@ -282,8 +258,8 @@ impl<G: Graph> Run<'_, G> {
             recursive: self.config.recursive,
             decompose: self.config.operator_decomposition,
             deadline,
-            distances: self.distances.clone(),
-            policy: self.policy.clone(),
+            distances: &self.distances,
+            policy: &self.policy,
             planners: BTreeMap::new(),
             stats: self.stats,
         };
@@ -309,9 +285,7 @@ fn paths(states: &[Key]) -> Vec<Path> {
     (0..agents)
         .map(|agent| {
             let mut path: Path = states.iter().map(|state| state.base[agent].0).collect();
-            while path.len() > 1 && path[path.len() - 2] == path[path.len() - 1] {
-                path.pop();
-            }
+            trim_trailing_waits(&mut path);
 
             path
         })

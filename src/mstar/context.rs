@@ -32,10 +32,10 @@ pub(super) struct Context<'a, G> {
     /// of the state.
     pub(super) deadline: Option<Time>,
     /// Distances to each agent's goal, indexed by agent.
-    pub(super) distances: Vec<Vec<Option<u32>>>,
+    pub(super) distances: &'a [Vec<Option<u32>>],
     /// `policy[agent][vertex]`: the agent's next vertex on its individual optimal path;
     /// `None` at its goal and where the goal is unreachable.
-    pub(super) policy: Vec<Vec<Option<Vertex>>>,
+    pub(super) policy: &'a [Vec<Option<Vertex>>],
     /// The planner of every subgroup queried so far, by its sorted agents. A planner is
     /// taken out while it runs.
     pub(super) planners: BTreeMap<Vec<AgentId>, Planner>,

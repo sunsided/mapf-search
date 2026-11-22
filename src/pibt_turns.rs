@@ -38,6 +38,7 @@ use self::costs::Costs;
 use crate::graph::{Heading, OrientedGraph, Vertex};
 use crate::instance::{AgentId, Instance};
 use crate::path::Path;
+use crate::pibt::{Priorities, all_at_goals};
 use crate::random::Random;
 use crate::solution::{MapfResult, Outcome, Solution};
 
@@ -108,11 +109,13 @@ pub fn pibt_turns<G: OrientedGraph>(
     );
 
     let costs = Costs::new(graph, agents);
-    let reachable = agents
+    let start_distance: Option<Vec<u32>> = agents
         .iter()
+        .zip(headings)
         .enumerate()
-        .all(|(index, agent)| costs.least(index, agent.start).is_some());
-    if !reachable {
+        .map(|(index, (agent, &heading))| costs.remaining(index, agent.start, heading))
+        .collect();
+    let Some(start_distance) = start_distance else {
         return TurnResult {
             result: MapfResult {
                 outcome: Outcome::Unsolvable,
@@ -120,9 +123,9 @@ pub fn pibt_turns<G: OrientedGraph>(
             },
             headings: Vec::new(),
         };
-    }
+    };
 
-    let mut run = Run::new(instance, costs, headings, seed);
+    let mut run = Run::new(instance, costs, headings, start_distance, seed);
     let outcome = run.solve(&mut budget);
     let headings = if matches!(outcome, Outcome::Solved(_)) {
         run.heading_paths
@@ -159,8 +162,8 @@ struct Run<'a, G> {
     occupant: Vec<Option<AgentId>>,
     /// The vertex each agent turned or waited towards last, requested first next time.
     intent: Vec<Option<Vertex>>,
-    /// How many steps each agent has spent away from its goal: its priority.
-    waiting: Vec<u64>,
+    /// The agents' priorities.
+    priorities: Priorities,
     /// How often an agent (first) was pushed into a new vertex by another (second).
     pushes: BTreeMap<(AgentId, AgentId), u32>,
     /// The requests of the current inheritance chain: each agent on it and the vertex it
@@ -177,11 +180,13 @@ struct Run<'a, G> {
 }
 
 impl<'a, G: OrientedGraph> Run<'a, G> {
-    /// A run from the starts of `instance`, facing `headings`.
+    /// A run from the starts of `instance`, facing `headings`, each `start_distance[agent]`
+    /// steps from its goal.
     fn new(
         instance: &'a Instance<G>,
         costs: Costs<'a, G>,
         headings: &[Heading],
+        start_distance: Vec<u32>,
         seed: u64,
     ) -> Self {
         let agents = instance.agents().len();
@@ -200,7 +205,7 @@ impl<'a, G: OrientedGraph> Run<'a, G> {
             reserved: vec![None; vertices],
             occupant: vec![None; vertices],
             intent: vec![None; agents],
-            waiting: vec![0; agents],
+            priorities: Priorities::new(start_distance),
             pushes: BTreeMap::new(),
             chain: Vec::new(),
             random: Random::new(seed),
@@ -211,7 +216,7 @@ impl<'a, G: OrientedGraph> Run<'a, G> {
     /// Takes steps until every agent stands at its goal or the budget ends.
     fn solve(&mut self, budget: &mut impl Budget<Stats>) -> Outcome {
         loop {
-            if self.all_at_goals() {
+            if all_at_goals(&self.here, self.instance.agents()) {
                 return Outcome::Solved(Solution::new(self.paths.clone()));
             }
 
@@ -223,14 +228,6 @@ impl<'a, G: OrientedGraph> Run<'a, G> {
         }
     }
 
-    /// Returns `true` if every agent stands at its goal.
-    fn all_at_goals(&self) -> bool {
-        self.here
-            .iter()
-            .zip(self.instance.agents())
-            .all(|(&here, agent)| here == agent.goal)
-    }
-
     /// One step: updates the priorities, decides every agent by decreasing priority, then
     /// carries the decisions out.
     fn step(&mut self) {
@@ -238,16 +235,9 @@ impl<'a, G: OrientedGraph> Run<'a, G> {
 
         for (agent, &here) in self.here.iter().enumerate() {
             self.occupant[here] = Some(agent);
-            if here == self.instance.agents()[agent].goal {
-                self.waiting[agent] = 0;
-            } else {
-                self.waiting[agent] += 1;
-            }
         }
 
-        let mut order: Vec<AgentId> = (0..self.here.len()).collect();
-        order.sort_unstable_by_key(|&agent| core::cmp::Reverse((self.waiting[agent], agent)));
-        for agent in order {
+        for agent in self.priorities.update(&self.here, self.instance.agents()) {
             if self.decided[agent].is_none() {
                 self.chain.clear();
                 self.plan(agent, None);
@@ -674,6 +664,50 @@ mod tests {
         assert_valid(&instance, &[0, 0], &run);
     }
 
+    /// A directed graph whose heading `h` faces vertex `h`, one turn from every other.
+    struct Directed(Vec<Vec<Vertex>>);
+
+    impl Graph for Directed {
+        fn vertex_count(&self) -> usize {
+            self.0.len()
+        }
+
+        fn neighbors(&self, vertex: Vertex, emit: impl FnMut(Vertex)) {
+            self.0[vertex].iter().copied().for_each(emit);
+        }
+    }
+
+    impl OrientedGraph for Directed {
+        fn heading_count(&self) -> usize {
+            self.0.len()
+        }
+
+        fn forward(&self, vertex: Vertex, heading: Heading) -> Option<Vertex> {
+            self.0[vertex].contains(&heading).then_some(heading)
+        }
+
+        fn turns(&self, heading: Heading, mut emit: impl FnMut(Heading)) {
+            (0..self.0.len())
+                .filter(|&h| h != heading)
+                .for_each(&mut emit);
+        }
+    }
+
+    /// No swap with a neighbour that has no edge back: agent 1 at 0 must not pull agent 0
+    /// at 2 into 0, as there is no edge `2 -> 0` (that pull used to panic). Agent 0, the
+    /// farther from its goal, goes first, through 1 into the dead end 4, before agent 1
+    /// parks on 1 and would block it for good.
+    #[test]
+    fn swaps_only_along_edges_back() {
+        let graph = Directed(vec![vec![1, 2, 3], vec![4], vec![1], vec![0], vec![]]);
+        let agents = vec![Agent { start: 2, goal: 4 }, Agent { start: 0, goal: 1 }];
+        let instance = Instance::new(graph, agents).expect("valid");
+
+        let run = pibt_turns(&instance, &[1, 1], 0, Limits::expansions(20));
+
+        assert_valid(&instance, &[1, 1], &run);
+    }
+
     /// A grid of 3-4 by 3-4 cells with walls, 2-5 agents on distinct free starts and goals,
     /// random headings and a seed.
     fn case() -> impl Strategy<Value = (Instance<Grid>, Vec<Heading>, u64)> {
@@ -727,9 +761,10 @@ mod tests {
         #[test]
         fn plans_are_valid((instance, headings, seed) in case()) {
             let costs = Costs::new(instance.graph(), instance.agents());
-            let reachable = instance.agents().iter().enumerate().all(|(i, a)| costs.least(i, a.start).is_some());
-            if reachable {
-                let mut run = Run::new(&instance, costs, &headings, seed);
+            let start_distance: Option<Vec<u32>> = instance.agents().iter().zip(&headings).enumerate()
+                .map(|(i, (a, &h))| costs.remaining(i, a.start, h)).collect();
+            if let Some(start_distance) = start_distance {
+                let mut run = Run::new(&instance, costs, &headings, start_distance, seed);
                 for _ in 0..100 {
                     run.step();
                 }

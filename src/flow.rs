@@ -22,7 +22,7 @@ use alloc::vec::Vec;
 use core::cmp::Reverse;
 
 use crate::graph::{Graph, Vertex};
-use crate::path::{Path, Time, path_cost, position_at};
+use crate::path::{Path, Time, path_cost, position_at, trim_trailing_waits};
 
 /// A reservation of a fixed path that blocks every routing of the other agents.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -353,9 +353,7 @@ impl Network {
             node = self.vertex_out(next, time + 1);
         }
 
-        while path.len() > 1 && path[path.len() - 2] == path[path.len() - 1] {
-            path.pop();
-        }
+        trim_trailing_waits(&mut path);
 
         path
     }

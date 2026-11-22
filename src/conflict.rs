@@ -92,13 +92,67 @@ pub fn conflicts<P: AsRef<[Vertex]>>(paths: &[P]) -> Vec<Conflict> {
     found
 }
 
+/// `found`, the conflicts among an earlier version of `paths`, after the agents in
+/// `changed` took new paths: the old conflicts between unchanged agents, and those of the
+/// changed agents rescanned, in the order of [`first_conflict`].
+///
+/// Costs `O(k n T)` for `k` changed agents of `n` with paths of up to `T` positions,
+/// where [`conflicts`] costs `O(n^2 T)`.
+///
+/// # Panics
+///
+/// Panics if a path is empty.
+pub(crate) fn update_conflicts<P: AsRef<[Vertex]>>(
+    found: &[Conflict],
+    paths: &[P],
+    changed: &[AgentId],
+) -> Vec<Conflict> {
+    let paths: Vec<&[Vertex]> = paths.iter().map(AsRef::as_ref).collect();
+    let involved = |conflict: &Conflict| {
+        let (a, b) = conflict.agents();
+        changed.contains(&a) || changed.contains(&b)
+    };
+
+    let mut updated: Vec<Conflict> = found.iter().filter(|c| !involved(c)).copied().collect();
+    for time in 0..horizon(&paths) {
+        for &a in changed {
+            // A pair of two changed agents is scanned once, from its smaller agent.
+            let others = (0..paths.len()).filter(|&b| b != a && !(b < a && changed.contains(&b)));
+            for b in others {
+                let pair = (a.min(b), a.max(b));
+                let found = conflicts_at(paths[pair.0], paths[pair.1], pair, time);
+                updated.extend(found.into_iter().flatten());
+            }
+        }
+    }
+
+    updated.sort_unstable_by_key(scan_order);
+
+    updated
+}
+
+/// The position of `conflict` in the order of [`first_conflict`]: by time, then agent
+/// pair, then a vertex conflict before a swap.
+fn scan_order(conflict: &Conflict) -> (Time, (AgentId, AgentId), bool) {
+    (
+        conflict.time(),
+        conflict.agents(),
+        matches!(conflict, Conflict::Edge { .. }),
+    )
+}
+
+/// The number of time steps to scan `paths` for conflicts: the longest path's length.
+fn horizon(paths: &[&[Vertex]]) -> Time {
+    let longest = paths.iter().map(|path| path.len()).max().unwrap_or(0);
+
+    Time::try_from(longest).expect("path lengths fit in u32 time steps")
+}
+
 /// Reports conflicts to `visit` in time order until it returns `false`.
 fn scan<P: AsRef<[Vertex]>>(paths: &[P], mut visit: impl FnMut(Conflict) -> bool) {
     let paths: Vec<&[Vertex]> = paths.iter().map(AsRef::as_ref).collect();
-    let horizon = paths.iter().map(|path| path.len()).max().unwrap_or(0);
-    let horizon = Time::try_from(horizon).expect("path lengths fit in u32 time steps");
 
-    for time in 0..horizon {
+    for time in 0..horizon(&paths) {
         if !scan_time(&paths, time, &mut visit) {
             return;
         }
@@ -144,4 +198,43 @@ fn conflicts_at(
     });
 
     [vertex, swap]
+}
+
+#[cfg(test)]
+mod tests {
+    //! Unit tests for incremental conflict detection.
+
+    use super::*;
+    use alloc::vec;
+
+    /// Updating after some agents changed gives what a full scan gives, in the same order.
+    #[test]
+    fn update_matches_a_full_scan() {
+        let before = [vec![0, 1, 2], vec![2, 1, 0], vec![5, 1, 6], vec![7, 6, 5]];
+        let after = [
+            vec![0, 1, 2],
+            vec![2, 2, 1, 0],
+            vec![5, 1, 6],
+            vec![6, 6, 5],
+        ];
+        let found = conflicts(&before);
+
+        for changed in [&[][..], &[1], &[3], &[1, 3], &[3, 1], &[0, 1, 2, 3]] {
+            let paths: Vec<_> = (0..4)
+                .map(|agent| {
+                    if changed.contains(&agent) {
+                        &after[agent]
+                    } else {
+                        &before[agent]
+                    }
+                })
+                .collect();
+
+            assert_eq!(
+                update_conflicts(&found, &paths, changed),
+                conflicts(&paths),
+                "changed {changed:?}"
+            );
+        }
+    }
 }

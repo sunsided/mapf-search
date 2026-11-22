@@ -39,6 +39,77 @@ pub fn position_at(path: &[Vertex], time: Time) -> Vertex {
         .expect("a path has at least one position")
 }
 
+/// What a path holds under goal-stay semantics, for building obstacles from it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Reservation {
+    /// The path is at `vertex` at `time`, before its final position.
+    Visit {
+        /// The occupied vertex.
+        vertex: Vertex,
+        /// The time step.
+        time: Time,
+    },
+    /// The path moves `from -> to` between `time` and `time + 1`; `from != to`. Another
+    /// agent moving `to -> from` then swaps with it.
+    Move {
+        /// The vertex the path leaves.
+        from: Vertex,
+        /// The vertex the path enters.
+        to: Vertex,
+        /// The time step the move starts at.
+        time: Time,
+    },
+    /// The path ends at `vertex` at `time` and stays there for good.
+    Park {
+        /// The last vertex.
+        vertex: Vertex,
+        /// The time of the last position.
+        time: Time,
+    },
+}
+
+/// Every [`Reservation`] of `path`: its visits before the last position, its moves (not
+/// its waits), and its park at the last position.
+///
+/// # Panics
+///
+/// Panics if `path` is empty or has more than `u32::MAX` positions.
+pub(crate) fn reservations(path: &[Vertex]) -> impl Iterator<Item = Reservation> + '_ {
+    let time = |index: usize| Time::try_from(index).expect("path lengths fit in u32 time steps");
+    let last = path.len() - 1;
+
+    let visits = path[..last]
+        .iter()
+        .enumerate()
+        .map(move |(index, &vertex)| Reservation::Visit {
+            vertex,
+            time: time(index),
+        });
+    let moves = path
+        .windows(2)
+        .enumerate()
+        .filter(|(_, step)| step[0] != step[1])
+        .map(move |(index, step)| Reservation::Move {
+            from: step[0],
+            to: step[1],
+            time: time(index),
+        });
+    let park = Reservation::Park {
+        vertex: path[last],
+        time: time(last),
+    };
+
+    visits.chain(moves).chain(core::iter::once(park))
+}
+
+/// Drops the waits at the end of `path`, keeping its last vertex: after that, goal-stay
+/// semantics put the agent there anyway.
+pub(crate) fn trim_trailing_waits(path: &mut Path) {
+    while path.len() > 1 && path[path.len() - 2] == path[path.len() - 1] {
+        path.pop();
+    }
+}
+
 /// The cost of one path: the time of its final arrival at its last vertex.
 ///
 /// Waits before the final arrival count, also waits at the goal before leaving it again.
@@ -100,6 +171,38 @@ mod tests {
         assert_eq!(path_cost(&[2, 1, 2]), 2);
         assert_eq!(sum_of_costs(&[vec![0, 1], vec![5, 5, 4]]), 3);
         assert_eq!(makespan(&[vec![0, 1], vec![5, 5, 4]]), 2);
+    }
+
+    /// A path reserves its visits, its moves without waits, and its park.
+    #[test]
+    fn reserves_visits_moves_and_park() {
+        let reserved: Vec<Reservation> = reservations(&[3, 3, 4]).collect();
+
+        assert_eq!(
+            reserved,
+            [
+                Reservation::Visit { vertex: 3, time: 0 },
+                Reservation::Visit { vertex: 3, time: 1 },
+                Reservation::Move {
+                    from: 3,
+                    to: 4,
+                    time: 1
+                },
+                Reservation::Park { vertex: 4, time: 2 },
+            ]
+        );
+    }
+
+    /// Only the waits at the end go; a single position stays.
+    #[test]
+    fn trims_only_trailing_waits() {
+        let mut path = vec![1, 1, 2, 2, 2];
+        trim_trailing_waits(&mut path);
+        assert_eq!(path, [1, 1, 2]);
+
+        let mut single = vec![4, 4];
+        trim_trailing_waits(&mut single);
+        assert_eq!(single, [4]);
     }
 
     /// The last position holds forever.

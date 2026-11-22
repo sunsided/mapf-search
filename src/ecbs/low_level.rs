@@ -112,13 +112,10 @@ impl Bounds {
     /// The bounds of `problem`, as in the A* low level.
     fn new<G: Graph>(problem: &Problem<'_, G>) -> Self {
         let constraints = problem.constraints;
-        let vertices = Time::try_from(problem.graph.vertex_count()).unwrap_or(Time::MAX);
 
         Self {
-            earliest_finish: constraints
-                .blocked_until(problem.agent.goal)
-                .map_or(0, |t| t.saturating_add(1)),
-            horizon: constraints.latest_step().saturating_add(vertices),
+            earliest_finish: constraints.earliest_finish(problem.agent.goal),
+            horizon: constraints.horizon(problem.graph.vertex_count()),
         }
     }
 

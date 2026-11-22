@@ -1,6 +1,6 @@
 //! How MO-CBS splits a node: which conflict ([`choose`]), into which constraints
-//! ([`constraints`]), which agents a constraint replans ([`affected`]), and bypass
-//! ([`bypass`]).
+//! ([`constraints`]), and bypass ([`bypass`]). Which agents a constraint replans is
+//! [`Constraint::affected`], shared with CBS.
 //!
 //! None of these changes the front. Any conflict may be split (the paper's Lemma 2 holds
 //! for every detected conflict). Disjoint splitting partitions the solutions a node permits
@@ -10,7 +10,6 @@
 //! vector, the two things P-nodes are defined by.
 
 use alloc::rc::Rc;
-use alloc::vec::Vec;
 
 use super::Child;
 use super::node::{Node, ParetoSet};
@@ -18,7 +17,6 @@ use crate::cbs::Splitting;
 use crate::conflict::{Conflict, conflicts, first_conflict};
 use crate::constraint::Constraint;
 use crate::graph::Vertex;
-use crate::instance::AgentId;
 
 /// The conflict of `node` to split, or `None` if its paths are conflict-free: with
 /// `prioritize`, the earliest of the most cardinal class ([`class`]), else the earliest.
@@ -78,25 +76,6 @@ pub(super) fn constraints<const N: usize>(
     }
 }
 
-/// The agents whose paths must be replanned once `constraint` is added: its own agent for
-/// a negative constraint, every other agent whose path breaks what a positive one implies
-/// for it.
-pub(super) fn affected(constraint: Constraint, paths: &[Rc<[Vertex]>]) -> Vec<AgentId> {
-    if !constraint.is_positive() {
-        return Vec::from([constraint.agent()]);
-    }
-
-    (0..paths.len())
-        .filter(|&agent| agent != constraint.agent())
-        .filter(|&agent| {
-            constraint
-                .implied_for(agent)
-                .iter()
-                .any(|implied| implied.is_violated_by(&paths[agent]))
-        })
-        .collect()
-}
-
 /// `parent` with the paths `child` offers, if every replanned agent has a path of exactly
 /// its cost in `parent` and the joint paths then have fewer conflicts; else `None`.
 ///
@@ -150,6 +129,7 @@ mod tests {
 
     use super::*;
     use alloc::vec;
+    use alloc::vec::Vec;
 
     /// A shared path.
     fn path(vertices: &[Vertex]) -> Rc<[Vertex]> {

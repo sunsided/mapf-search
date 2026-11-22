@@ -198,16 +198,12 @@ impl<'a, G: Graph, P> SpaceTime<'a, G, P> {
     /// The graph of `agent` on `graph` under `constraints`, with the horizon described in
     /// the module docs.
     fn new(graph: &'a G, agent: Agent, constraints: &'a ConstraintSet, pricing: P) -> Self {
-        let vertices = Time::try_from(graph.vertex_count()).unwrap_or(Time::MAX);
-
         Self {
             graph,
             constraints,
             pricing,
-            earliest_finish: constraints
-                .blocked_until(agent.goal)
-                .map_or(0, |t| t.saturating_add(1)),
-            horizon: constraints.latest_step().saturating_add(vertices),
+            earliest_finish: constraints.earliest_finish(agent.goal),
+            horizon: constraints.horizon(graph.vertex_count()),
         }
     }
 }
@@ -239,6 +235,18 @@ pub(crate) fn distance_tables<G: Graph>(graph: &G, agents: &[Agent]) -> Vec<Vec<
         .iter()
         .map(|agent| distances_to(graph, agent.goal))
         .collect()
+}
+
+/// The largest distance of an agent from its start to its goal, in `distances` as from
+/// [`distance_tables`]: a lower bound on the makespan. Agents that cannot reach their goal
+/// do not count; `0` without agents.
+pub(crate) fn makespan_lower_bound(agents: &[Agent], distances: &[Vec<Option<u32>>]) -> Time {
+    agents
+        .iter()
+        .zip(distances)
+        .filter_map(|(agent, distances)| distances[agent.start])
+        .max()
+        .unwrap_or(0)
 }
 
 #[cfg(test)]
