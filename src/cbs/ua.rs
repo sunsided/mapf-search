@@ -172,9 +172,15 @@ pub(super) struct Unassigned {
 
 impl<G: Graph> Search<'_, G> {
     /// Returns `true` if popping `node` ends the search without further work: it is
-    /// conflict-free and there are no unassigned agents to route.
+    /// conflict-free and there are no unassigned agents to route (the oracle still runs for
+    /// an empty set, trivially, to record its routing).
     pub(super) fn is_final(&self, node: &Node) -> bool {
-        node.conflict.is_none() && self.unassigned.is_none()
+        let nobody = self
+            .unassigned
+            .as_ref()
+            .is_none_or(|unassigned| unassigned.starts.is_empty());
+
+        node.conflict.is_none() && nobody
     }
 
     /// Routes the unassigned agents around the paths of the conflict-free `node`: `None`
@@ -523,7 +529,8 @@ mod tests {
         assert_eq!(solution.unassigned, [vec![1, 2]]);
     }
 
-    /// Without unassigned agents, FOCBS is CBS, with the same statistics.
+    /// Without unassigned agents, FOCBS is CBS, with the same statistics, also when the
+    /// budget runs out exactly as the solution is popped.
     #[test]
     fn without_unassigned_agents_is_cbs() {
         let grid = Grid::parse(&["...", "@.@"]);
@@ -535,11 +542,18 @@ mod tests {
             CbsConfig::plain(Objective::SumOfCosts),
             CbsConfig::improved(Objective::SumOfCosts),
         ] {
-            let focbs = focbs_with(&ua, config, Limits::expansions(BUDGET));
-            let cbs = cbs_with(&plain, config, Limits::expansions(BUDGET));
+            let needed = cbs_with(&plain, config, Limits::NONE).stats.expanded;
+            for budget in 0..=needed {
+                let focbs = focbs_with(&ua, config, Limits::expansions(budget));
+                let cbs = cbs_with(&plain, config, Limits::expansions(budget));
 
-            assert_eq!(focbs.solution().map(|s| &s.assigned), cbs.solution());
-            assert_eq!(focbs.stats, cbs.stats);
+                assert_eq!(
+                    focbs.solution().map(|s| &s.assigned),
+                    cbs.solution(),
+                    "budget {budget}"
+                );
+                assert_eq!(focbs.stats, cbs.stats);
+            }
         }
     }
 
