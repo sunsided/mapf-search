@@ -198,6 +198,12 @@ proptest! {
         check(&grid, &agents, Solver::MStar(config))?;
     }
 
+    /// EPEA* agrees with the oracle, for both objectives.
+    #[test]
+    fn epea_matches_joint_search((grid, agents) in instance(), objective in objective()) {
+        check(&grid, &agents, Solver::Epea(objective))?;
+    }
+
     /// PBS plans are valid and no cheaper than the optimum, for both objectives; PBS may
     /// give up.
     #[test]

@@ -20,6 +20,8 @@
 //! - [`mstar()`]: recursive M* with operator decomposition (subdimensional expansion),
 //!   optimal, and able to prove unsolvability; [`mstar_with`] and [`MStarConfig`] select
 //!   basic M*, recursive M* without operator decomposition, and OD-M*.
+//! - [`epea()`]: enhanced partial expansion A* in the joint space, optimal, and able to
+//!   prove unsolvability; it generates only the children at a node's stored `f`.
 //! - [`pbs()`]: priority-based search, fast but neither optimal nor complete.
 //! - `mo_cbs`, `mo_cbs_with` and `mo_cbs_per_agent`, with the `multi-objective` feature:
 //!   multi-objective CBS (MO-CBS and MO-CBS-t, over BOA* or NAMOA*dr), every
@@ -59,7 +61,7 @@
 //! # Ok::<(), mapf_search::InstanceError>(())
 //! ```
 //!
-//! Not yet implemented: CBS-TA, MAPF-LNS2 and EPEA*.
+//! Not yet implemented: CBS-TA and MAPF-LNS2.
 //!
 //! Repository: <https://github.com/sunsided/mapf-search>
 
@@ -78,6 +80,7 @@ mod conflict;
 mod conflict_table;
 mod constraint;
 mod ecbs;
+mod epea;
 mod focal;
 mod graph;
 mod icts;
@@ -96,6 +99,7 @@ pub use cbs::{CbsConfig, CbsHeuristic, Splitting, cbs, cbs_with};
 pub use conflict::{Conflict, conflicts, first_conflict};
 pub use constraint::{Constraint, ConstraintSet};
 pub use ecbs::ecbs;
+pub use epea::epea;
 pub use graph::{AdjacencyList, Graph, Grid, Vertex};
 pub use heuristic_search::{Budget, Limits, Stats, Weight};
 pub use icts::icts;

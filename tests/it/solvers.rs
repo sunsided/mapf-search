@@ -5,7 +5,7 @@
 use heuristic_search::Limits;
 use mapf_search::{
     AdjacencyList, Agent, CbsConfig, Graph, Grid, Instance, MStarConfig, MapfResult, Objective,
-    Outcome, Weight, cbs_with, ecbs, icts, mstar_with, pbs,
+    Outcome, Weight, cbs_with, ecbs, epea, icts, mstar_with, pbs,
 };
 
 use crate::oracle::{assert_valid_plan, optimal_cost};
@@ -23,6 +23,8 @@ pub enum Solver {
     Icts(Objective),
     /// M*, basic or recursive; optimal for its objective.
     MStar(MStarConfig),
+    /// EPEA*; optimal for its objective.
+    Epea(Objective),
 }
 
 impl Solver {
@@ -35,7 +37,7 @@ impl Solver {
     }
 
     /// Every solver in a representative configuration, for `objective`.
-    pub fn all_for(objective: Objective) -> [Self; 8] {
+    pub fn all_for(objective: Objective) -> [Self; 9] {
         [
             Self::Cbs(CbsConfig::plain(objective)),
             Self::Cbs(CbsConfig::improved(objective)),
@@ -45,6 +47,7 @@ impl Solver {
             Self::MStar(MStarConfig::basic(objective)),
             Self::MStar(MStarConfig::recursive(objective)),
             Self::MStar(MStarConfig::od_recursive(objective)),
+            Self::Epea(objective),
         ]
     }
 
@@ -57,6 +60,7 @@ impl Solver {
             Self::Pbs(objective) => pbs(instance, objective, limits),
             Self::Icts(objective) => icts(instance, objective, limits),
             Self::MStar(config) => mstar_with(instance, config, limits),
+            Self::Epea(objective) => epea(instance, objective, limits),
         }
     }
 
@@ -65,7 +69,10 @@ impl Solver {
         match self {
             Self::Cbs(config) => config.objective,
             Self::MStar(config) => config.objective,
-            Self::Ecbs(objective, _) | Self::Pbs(objective) | Self::Icts(objective) => objective,
+            Self::Ecbs(objective, _)
+            | Self::Pbs(objective)
+            | Self::Icts(objective)
+            | Self::Epea(objective) => objective,
         }
     }
 
@@ -73,7 +80,7 @@ impl Solver {
     /// solver guarantees no quality.
     pub fn bound(self) -> Option<(u32, u32)> {
         match self {
-            Self::Cbs(_) | Self::Icts(_) | Self::MStar(_) => Some((1, 1)),
+            Self::Cbs(_) | Self::Icts(_) | Self::MStar(_) | Self::Epea(_) => Some((1, 1)),
             Self::Ecbs(_, weight) => Some((weight.numerator(), weight.denominator())),
             Self::Pbs(_) => None,
         }
