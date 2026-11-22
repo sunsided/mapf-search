@@ -152,7 +152,97 @@ impl<G: Graph> TaskInstance<G> {
     }
 }
 
-/// Why [`Instance::new`] or [`TaskInstance::new`] rejected an instance.
+/// A validated instance of MAPF with unassigned agents (MAPF-UA): agents with a goal, and
+/// agents with only a start that may end anywhere but must not get in the way.
+///
+/// Starts are pairwise distinct over all agents, goals pairwise distinct, and every start
+/// and goal is a vertex of the graph. See [`focbs`](crate::focbs()).
+///
+/// # Examples
+///
+/// ```
+/// use mapf_search::{Agent, Grid, InstanceError, UaInstance};
+///
+/// let grid = Grid::new(3, 1);
+/// let assigned = vec![Agent { start: 0, goal: 2 }];
+///
+/// assert!(UaInstance::new(grid.clone(), assigned.clone(), vec![1]).is_ok());
+/// assert_eq!(
+///     UaInstance::new(grid, assigned, vec![0]).unwrap_err(),
+///     InstanceError::SharedStart(0, 1)
+/// );
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UaInstance<G> {
+    /// The graph the agents move on.
+    graph: G,
+    /// The agents with a goal.
+    assigned: Vec<Agent>,
+    /// The starts of the agents without one.
+    unassigned: Vec<Vertex>,
+}
+
+impl<G: Graph> UaInstance<G> {
+    /// Creates an instance after checking the agents against the graph. In errors, agents
+    /// are numbered with the assigned ones first: unassigned agent `j` is agent
+    /// `assigned.len() + j`.
+    ///
+    /// # Errors
+    ///
+    /// - [`InstanceError::OutOfRange`] if a start or goal is not a vertex of `graph`;
+    /// - [`InstanceError::SharedStart`] if two agents start at the same vertex;
+    /// - [`InstanceError::SharedGoal`] if two assigned agents have the same goal.
+    pub fn new(
+        graph: G,
+        assigned: Vec<Agent>,
+        unassigned: Vec<Vertex>,
+    ) -> Result<Self, InstanceError> {
+        let count = graph.vertex_count();
+        let checked = Instance::new(graph, assigned)?;
+        let Instance { graph, agents } = checked;
+        let starts: Vec<Vertex> = agents
+            .iter()
+            .map(|agent| agent.start)
+            .chain(unassigned.iter().copied())
+            .collect();
+        for (agent, &start) in starts.iter().enumerate().skip(agents.len()) {
+            if start >= count {
+                return Err(InstanceError::OutOfRange { agent });
+            }
+
+            if let Some(other) = starts[..agent].iter().position(|&s| s == start) {
+                return Err(InstanceError::SharedStart(other, agent));
+            }
+        }
+
+        Ok(Self {
+            graph,
+            assigned: agents,
+            unassigned,
+        })
+    }
+
+    /// The graph the agents move on.
+    #[must_use]
+    pub fn graph(&self) -> &G {
+        &self.graph
+    }
+
+    /// The agents with a goal.
+    #[must_use]
+    pub fn assigned(&self) -> &[Agent] {
+        &self.assigned
+    }
+
+    /// The starts of the agents without a goal.
+    #[must_use]
+    pub fn unassigned(&self) -> &[Vertex] {
+        &self.unassigned
+    }
+}
+
+/// Why [`Instance::new`], [`TaskInstance::new`] or [`UaInstance::new`] rejected an
+/// instance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InstanceError {
     /// The start or goal of `agent` is not a vertex of the graph.

@@ -6,8 +6,8 @@ use std::hint::black_box;
 use criterion::Criterion;
 use mapf_search::{
     Agent, CbsConfig, Grid, Instance, Limits, Lns2Config, MStarConfig, MapfResult, Objective,
-    TaskAgent, TaskInstance, Weight, cbs_ta, cbs_with, ecbs, epea, icts, lns2, mstar_with, pbs,
-    pibt,
+    TaskAgent, TaskInstance, UaInstance, Weight, cbs_ta, cbs_with, ecbs, epea, focbs, icts, lns2,
+    mstar_with, pbs, pibt,
 };
 
 /// The benchmark instance: eight agents crossing an 8x8 map with a few walls.
@@ -62,11 +62,20 @@ fn crowded() -> Instance<Grid> {
     Instance::new(Grid::new(8, 8), agents).expect("valid")
 }
 
+/// The benchmark instance with its last two agents left without goals.
+fn with_idle_agents(instance: &Instance<Grid>) -> UaInstance<Grid> {
+    let (assigned, idle) = instance.agents().split_at(6);
+    let starts = idle.iter().map(|agent| agent.start).collect();
+
+    UaInstance::new(instance.graph().clone(), assigned.to_vec(), starts).expect("valid")
+}
+
 /// Benchmarks every solver.
 fn main() {
     let instance = instance();
     let tasks = anonymous(&instance);
     let crowded = crowded();
+    let idle = with_idle_agents(&instance);
     let budget = || Limits::expansions(100_000);
     let soc = Objective::SumOfCosts;
     let solvers: [(&str, &dyn Fn() -> MapfResult); 14] = [
@@ -118,6 +127,14 @@ fn main() {
         assert!(solve().solution().is_some(), "{name} solves the benchmark");
         c.bench_function(name, |b| b.iter(|| black_box(solve())));
     }
+
+    assert!(
+        focbs(&idle, budget()).solution().is_some(),
+        "focbs solves the benchmark"
+    );
+    c.bench_function("focbs two idle", |b| {
+        b.iter(|| black_box(focbs(&idle, budget())));
+    });
 
     c.final_summary();
 }
