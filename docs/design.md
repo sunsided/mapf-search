@@ -285,6 +285,54 @@ Every solver returns a `MapfResult`: an `Outcome` and high-level `Stats`. `Outco
 `Solved(Solution)`, `Unsolvable` (a proof), `LimitReached` (the budget stopped the run) or
 `Exhausted`. Only PBS returns `Exhausted`: it ran out of options, which proves nothing.
 
+## CBS-TA (Hönig et al. 2018)
+
+`cbs_ta(instance, objective, budget)` and `cbs_ta_with(instance, config, budget)` solve a
+`TaskInstance`: each agent has a start and a list of candidate goals, and a solution ends
+every agent at a distinct one of its candidates. Agents may share candidates. The result is
+optimal over all assignments and plans; agent `i`'s goal is the last vertex of its path.
+
+- **Forest.** One constraint tree per assignment, each searched exactly as by `cbs_with`
+  (all of `CbsConfig` applies). The CBS `Search` holds the starts, the candidate goals with
+  one distance table each, and the assignment of every opened tree; a node carries its tree
+  index, and the low level, the MDDs and WDG's pair weights look up the agent's goal
+  through it. WDG's cache key includes the pair's goals, so trees that assign a pair the
+  same goals share weights. Plain CBS is the forest with one tree, agent `i` at goal `i`.
+- **Assignments in order of cost.** `assignment.rs` ranks the assignments of the cost
+  matrix (agent to candidate: the shortest distance, or none if the goal is not a
+  candidate or unreachable) with Murty's partitioning over the Hungarian method. For sum
+  of costs the key is the sum. For makespan it is the bottleneck, then the sum: the
+  smallest threshold that still admits an assignment, found by a binary search over the
+  distinct entries, each step a Hungarian solve with the larger entries removed.
+- **Opening trees.** Before each pop, the next ranked assignment becomes a tree while its
+  cost is below the best open key, or while nothing is open. An assignment's cost is the
+  objective of its root without heuristic, which bounds every node of its tree from below,
+  so no closed tree can beat the node popped next.
+
+### Paper comparison
+
+| Paper (Hönig et al. 2018) | Here | Status |
+| --- | --- | --- |
+| Binary `N x M` assignment matrix `A`; goals may outnumber agents | candidate goal list per agent; goals are their union | same |
+| An agent without an assigned goal only has to stop somewhere | every agent needs a goal; fewer goals than agents is `Unsolvable` | narrower |
+| Sum of individual costs | `Objective::SumOfCosts`, plus makespan via bottleneck assignments | generalized |
+| Forest of constraint trees, one per assignment | the same, in one open list | same |
+| Next root created when a root node is expanded | next root opened when its cost is below the best open key | lazier, same optimality; also correct with CBS heuristics and bypass |
+| `constrainedAssignment(I, O, C)`: forced entries cost 0, forbidden ones infinity, then the Hungarian method | forced pairs clear the rest of their row and column, forbidden pairs are removed | same partition |
+| Plain CBS high level | every `CbsConfig` improvement | beyond the paper |
+| ECBS-TA (bounded suboptimal) | not implemented | missing |
+
+### Tests
+
+A property test compares `cbs_ta_with` on random 3x3 instances (up to three agents, one to
+three candidates each, both objectives, plain and improved) with CBS run on every
+assignment. Another checks that the ranked assignments match brute-force enumeration in
+order and count. With one candidate per agent, CBS-TA returns what CBS returns, with the
+same statistics. The fuzz target runs CBS-TA with every agent allowed at every goal and
+checks the plan and that it costs no more than CBS's. The benchmark runs it on the
+eight-agent instance with all goals shared: about 53 µs (bench profile, shared machine),
+against about 1.1 ms for `cbs` on the fixed assignment.
+
 ## ECBS (Barer et al. 2014)
 
 `ecbs(instance, objective, weight, budget)` returns a plan whose objective value is at
@@ -661,9 +709,6 @@ built, so the checks inside the low level see completed expansions only and
 
 ## Later algorithms
 
-- **CBS-TA** (Hönig et al. 2018): task assignment plus pathfinding. The root enumerates
-  assignments in order of cost (Murty's k-best assignments); each CT node also carries
-  an assignment. Agents get a set of candidate goals.
 - **MAPF-LNS2** (Li et al. 2022): start from a plan with collisions (prioritized planning
   with soft constraints), repeatedly pick a neighbourhood of agents, replan them with
   SIPPS, keep the result if collisions drop. Needs SIPP (safe-interval path planning) as
@@ -757,7 +802,7 @@ lower bound on 4-connected grids. Moves stay 4-connected, as in the MAPF benchma
 
 ## Roadmap
 
-SIPP, MAPF-LNS2, CBS-TA and EPEA*.
+SIPP, MAPF-LNS2 and EPEA*.
 
 ## Cross-crate needs
 
@@ -867,7 +912,10 @@ level cannot yet (see ECBS).
   finding with conflict-based search. IJCAI 2019.
 - J. Li, D. Harabor, P. Stuckey, H. Ma, S. Koenig. Disjoint splitting for multi-agent path
   finding with conflict-based search. ICAPS 2019.
-- W. Hönig et al. Conflict-based search with optimal task assignment. AAMAS 2018. (CBS-TA)
+- W. Hönig, S. Kiesel, A. Tinka, J. W. Durham, N. Ayanian. Conflict-based search with
+  optimal task assignment. AAMAS 2018. (CBS-TA)
+- K. G. Murty. An algorithm for ranking all the assignments in order of increasing cost.
+  Operations Research 16, 1968.
 - G. Sharon, R. Stern, M. Goldenberg, A. Felner. The increasing cost tree search for
   optimal multi-agent pathfinding. Artificial Intelligence 195, 2013. (ICTS)
 - H. Ma, D. Harabor, P. Stuckey, J. Li, S. Koenig. Searching with consistent

@@ -5,8 +5,8 @@ use std::hint::black_box;
 
 use criterion::Criterion;
 use mapf_search::{
-    Agent, CbsConfig, Grid, Instance, Limits, MStarConfig, MapfResult, Objective, Weight, cbs_with,
-    ecbs, icts, mstar_with, pbs,
+    Agent, CbsConfig, Grid, Instance, Limits, MStarConfig, MapfResult, Objective, TaskAgent,
+    TaskInstance, Weight, cbs_ta, cbs_with, ecbs, icts, mstar_with, pbs,
 };
 
 /// The benchmark instance: eight agents crossing an 8x8 map with a few walls.
@@ -33,18 +33,35 @@ fn instance() -> Instance<Grid> {
     Instance::new(grid, agents).expect("valid")
 }
 
+/// The benchmark instance with every agent allowed at every agent's goal.
+fn anonymous(instance: &Instance<Grid>) -> TaskInstance<Grid> {
+    let goals: Vec<_> = instance.agents().iter().map(|agent| agent.goal).collect();
+    let agents = instance
+        .agents()
+        .iter()
+        .map(|agent| TaskAgent {
+            start: agent.start,
+            goals: goals.clone(),
+        })
+        .collect();
+
+    TaskInstance::new(instance.graph().clone(), agents).expect("valid")
+}
+
 /// Benchmarks every solver.
 fn main() {
     let instance = instance();
+    let tasks = anonymous(&instance);
     let budget = || Limits::expansions(100_000);
     let soc = Objective::SumOfCosts;
-    let solvers: [(&str, &dyn Fn() -> MapfResult); 9] = [
+    let solvers: [(&str, &dyn Fn() -> MapfResult); 10] = [
         ("cbs plain", &|| {
             cbs_with(&instance, CbsConfig::plain(soc), budget())
         }),
         ("cbs improved", &|| {
             cbs_with(&instance, CbsConfig::improved(soc), budget())
         }),
+        ("cbs-ta anonymous", &|| cbs_ta(&tasks, soc, budget())),
         ("ecbs w=1.5", &|| {
             ecbs(&instance, soc, Weight::new(3, 2), budget())
         }),

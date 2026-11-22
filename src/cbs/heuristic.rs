@@ -29,16 +29,17 @@ use crate::instance::AgentId;
 use crate::mdd::Mdd;
 use crate::path::{Path, path_cost};
 
-/// The key of a cached pair weight: the two agents (smaller first) and their constraint
-/// sets, implied constraints included.
-pub(super) type PairKey = (AgentId, AgentId, ConstraintSet, ConstraintSet);
+/// The key of a cached pair weight: the two agents (smaller first), their assigned goals
+/// and their constraint sets, implied constraints included.
+pub(super) type PairKey = (AgentId, AgentId, [usize; 2], ConstraintSet, ConstraintSet);
 
 impl<G: Graph> Search<'_, G> {
-    /// The heuristic value of a node with `constraints`, `paths` and the MDDs of its
+    /// The heuristic value of a node of `tree` with `constraints`, `paths` and the MDDs of its
     /// conflicting agents, whose conflicts `found` have the cardinalities `classes`; `None`
     /// if WDG proved a pair to have no joint plan, so the node has no solution.
     pub(super) fn heuristic(
         &self,
+        tree: usize,
         constraints: &[Constraint],
         paths: &[Path],
         found: &[Conflict],
@@ -69,7 +70,8 @@ impl<G: Graph> Search<'_, G> {
                 let weighted = pairs
                     .iter()
                     .map(|&(pair, cardinal)| {
-                        let weight = self.pair_weight(pair, cardinal, constraints, paths, mdds)?;
+                        let weight =
+                            self.pair_weight(tree, pair, cardinal, constraints, paths, mdds)?;
                         Some((pair.0, pair.1, weight))
                     })
                     .collect::<Option<Vec<_>>>()?;
@@ -78,11 +80,12 @@ impl<G: Graph> Search<'_, G> {
         }
     }
 
-    /// The WDG weight of `pair`: `0` if independent, else the rise of the pair's optimal
+    /// The WDG weight of `pair` in `tree`: `0` if independent, else the rise of the pair's optimal
     /// sum of costs over the agents' current costs (at least 1), cached by constraints.
     /// `None` if the pair has no joint plan.
     fn pair_weight(
         &self,
+        tree: usize,
         pair: (AgentId, AgentId),
         cardinal: bool,
         constraints: &[Constraint],
@@ -91,7 +94,8 @@ impl<G: Graph> Search<'_, G> {
     ) -> Option<u32> {
         let (a, b) = pair;
         let sets = [a, b].map(|agent| ConstraintSet::for_agent(agent, constraints));
-        let key: PairKey = (a, b, sets[0].clone(), sets[1].clone());
+        let goals = [a, b].map(|agent| self.trees[tree][agent]);
+        let key: PairKey = (a, b, goals, sets[0].clone(), sets[1].clone());
         if let Some(&weight) = self.pair_weights.borrow().get(&key) {
             return weight;
         }
@@ -99,9 +103,9 @@ impl<G: Graph> Search<'_, G> {
         let weight = if cardinal || dependent(pair, mdds) {
             let current = path_cost(&paths[a]) + path_cost(&paths[b]);
             let problem = Pair {
-                graph: self.instance.graph(),
-                agents: [a, b].map(|agent| self.instance.agents()[agent]),
-                distances: [&self.distances[a], &self.distances[b]],
+                graph: self.graph,
+                agents: [a, b].map(|agent| self.agent(tree, agent)),
+                distances: [a, b].map(|agent| self.distances(tree, agent)),
                 constraints: sets,
             };
             pair_cost(&problem).map(|optimum| optimum.saturating_sub(current).max(1))
@@ -203,7 +207,7 @@ mod tests {
             ..CbsConfig::plain(Objective::SumOfCosts)
         };
         let mut search = Search::new(instance, config);
-        let Some(root) = search.root() else {
+        let Some(root) = search.root(0) else {
             return Vec::new();
         };
 
@@ -242,10 +246,10 @@ mod tests {
         let search = Search::new(instance, config);
         let found = conflicts(&node.paths);
         let mut mdds = vec![None; node.paths.len()];
-        search.fill_mdds(&node.constraints, &node.paths, &mut mdds, &found);
+        search.fill_mdds(0, &node.constraints, &node.paths, &mut mdds, &found);
         let classes: Vec<Cardinality> = found.iter().map(|c| cardinality(c, &mdds)).collect();
 
-        search.heuristic(&node.constraints, &node.paths, &found, &classes, &mdds)
+        search.heuristic(0, &node.constraints, &node.paths, &found, &classes, &mdds)
     }
 
     proptest! {
