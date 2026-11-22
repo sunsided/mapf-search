@@ -210,6 +210,12 @@ proptest! {
         check(&grid, &agents, Solver::Lns2(objective))?;
     }
 
+    /// PIBT plans are valid and no cheaper than the optimum; PIBT may stop at its budget.
+    #[test]
+    fn pibt_plans_are_valid((grid, agents) in instance(), objective in objective()) {
+        check(&grid, &agents, Solver::Pibt(objective))?;
+    }
+
     /// PBS plans are valid and no cheaper than the optimum, for both objectives; PBS may
     /// give up.
     #[test]

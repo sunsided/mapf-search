@@ -7,6 +7,7 @@ use criterion::Criterion;
 use mapf_search::{
     Agent, CbsConfig, Grid, Instance, Limits, Lns2Config, MStarConfig, MapfResult, Objective,
     TaskAgent, TaskInstance, Weight, cbs_ta, cbs_with, ecbs, epea, icts, lns2, mstar_with, pbs,
+    pibt,
 };
 
 /// The benchmark instance: eight agents crossing an 8x8 map with a few walls.
@@ -54,7 +55,7 @@ fn main() {
     let tasks = anonymous(&instance);
     let budget = || Limits::expansions(100_000);
     let soc = Objective::SumOfCosts;
-    let solvers: [(&str, &dyn Fn() -> MapfResult); 12] = [
+    let solvers: [(&str, &dyn Fn() -> MapfResult); 13] = [
         ("cbs plain", &|| {
             cbs_with(&instance, CbsConfig::plain(soc), budget())
         }),
@@ -67,6 +68,7 @@ fn main() {
         }),
         ("pbs", &|| pbs(&instance, soc, budget())),
         ("lns2", &|| lns2(&instance, Lns2Config::default(), budget())),
+        ("pibt", &|| pibt(&instance, budget())),
         ("icts", &|| icts(&instance, soc, budget())),
         ("epea", &|| epea(&instance, soc, budget())),
         ("mstar basic", &|| {

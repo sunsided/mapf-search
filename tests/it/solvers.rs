@@ -5,7 +5,7 @@
 use heuristic_search::Limits;
 use mapf_search::{
     AdjacencyList, Agent, CbsConfig, Graph, Grid, Instance, Lns2Config, MStarConfig, MapfResult,
-    Objective, Outcome, Weight, cbs_with, ecbs, epea, icts, lns2, mstar_with, pbs,
+    Objective, Outcome, Weight, cbs_with, ecbs, epea, icts, lns2, mstar_with, pbs, pibt,
 };
 
 use crate::oracle::{assert_valid_plan, optimal_cost};
@@ -28,6 +28,9 @@ pub enum Solver {
     /// MAPF-LNS2 with its default configuration; no guarantee, incomplete. It optimizes
     /// nothing; the objective is the one its plans are checked against.
     Lns2(Objective),
+    /// PIBT; no guarantee, incomplete. It optimizes nothing; the objective is the one its
+    /// plans are checked against.
+    Pibt(Objective),
 }
 
 impl Solver {
@@ -40,7 +43,7 @@ impl Solver {
     }
 
     /// Every solver in a representative configuration, for `objective`.
-    pub fn all_for(objective: Objective) -> [Self; 10] {
+    pub fn all_for(objective: Objective) -> [Self; 11] {
         [
             Self::Cbs(CbsConfig::plain(objective)),
             Self::Cbs(CbsConfig::improved(objective)),
@@ -52,6 +55,7 @@ impl Solver {
             Self::MStar(MStarConfig::od_recursive(objective)),
             Self::Epea(objective),
             Self::Lns2(objective),
+            Self::Pibt(objective),
         ]
     }
 
@@ -72,6 +76,8 @@ impl Solver {
                 Lns2Config::default(),
                 Limits::expansions(budget.min(500)),
             ),
+            // PIBT that has not finished a tiny instance in 500 steps oscillates.
+            Self::Pibt(_) => pibt(instance, Limits::expansions(budget.min(500))),
         }
     }
 
@@ -84,7 +90,8 @@ impl Solver {
             | Self::Pbs(objective)
             | Self::Icts(objective)
             | Self::Epea(objective)
-            | Self::Lns2(objective) => objective,
+            | Self::Lns2(objective)
+            | Self::Pibt(objective) => objective,
         }
     }
 
@@ -94,14 +101,14 @@ impl Solver {
         match self {
             Self::Cbs(_) | Self::Icts(_) | Self::MStar(_) | Self::Epea(_) => Some((1, 1)),
             Self::Ecbs(_, weight) => Some((weight.numerator(), weight.denominator())),
-            Self::Pbs(_) | Self::Lns2(_) => None,
+            Self::Pbs(_) | Self::Lns2(_) | Self::Pibt(_) => None,
         }
     }
 
     /// Returns `true` if the solver never gives up before its budget, so it returns
     /// `Solved` on every solvable instance given enough budget.
     pub fn is_complete(self) -> bool {
-        !matches!(self, Self::Pbs(_) | Self::Lns2(_))
+        !matches!(self, Self::Pbs(_) | Self::Lns2(_) | Self::Pibt(_))
     }
 }
 
@@ -122,8 +129,13 @@ pub fn assert_within(solver: Solver, cost: u32, optimum: u32) {
 
 /// Runs every solver on `agents` over `graph` and checks the result against the oracle.
 fn check_all<G: Graph + Clone>(graph: &G, agents: &[Agent]) {
+    check_solvers(graph, agents, Solver::all());
+}
+
+/// Runs `solvers` on `agents` over `graph` and checks each result against the oracle.
+fn check_solvers<G: Graph + Clone>(graph: &G, agents: &[Agent], solvers: Vec<Solver>) {
     let instance = Instance::new(graph.clone(), agents.to_vec()).expect("valid");
-    for solver in Solver::all() {
+    for solver in solvers {
         let optimum = optimal_cost(graph, agents, solver.objective()).expect("solvable");
         let result = solver.run(&instance, 1_000);
         let solution = result
@@ -143,12 +155,19 @@ fn check_all<G: Graph + Clone>(graph: &G, agents: &[Agent]) {
 ///     |
 ///     3
 /// ```
+///
+/// Every solver but PIBT: the graph has no cycle, so PIBT pushes the agent at the goal to a
+/// dead end and back forever (`pibt::tests::can_livelock_off_a_cycle`).
 #[test]
 fn every_solver_steps_off_a_goal() {
     let graph = AdjacencyList::undirected(4, &[(0, 1), (1, 2), (1, 3)]);
     let agents = [Agent { start: 1, goal: 1 }, Agent { start: 0, goal: 2 }];
+    let solvers = Solver::all()
+        .into_iter()
+        .filter(|solver| !matches!(solver, Solver::Pibt(_)))
+        .collect();
 
-    check_all(&graph, &agents);
+    check_solvers(&graph, &agents, solvers);
 }
 
 /// Agent 0 would reach its goal, vertex 1, before agent 1 passes through it; one of them

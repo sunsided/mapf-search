@@ -2,8 +2,8 @@
 
 Multi-agent pathfinding (MAPF): find one path per agent so that no two agents collide,
 minimizing a joint objective. This crate hosts the conflict-based family (CBS, CBS-TA,
-ECBS, MO-CBS), ICTS, PBS, M*, EPEA* and MAPF-LNS2; SIPPS, a faster low level for
-MAPF-LNS2, is on the roadmap.
+ECBS, MO-CBS), ICTS, PBS, PIBT, M*, EPEA* and MAPF-LNS2; SIPPS, a faster low level for
+MAPF-LNS2, FOCBS and the turn-aware PIBT*_T are on the roadmap.
 
 These algorithms share the problem model, path conflicts, joint objectives, constraints
 and reservations, and the single-agent low-level search. They do **not** share one search
@@ -48,8 +48,8 @@ engine with pluggable policies.
   is `sum(len_i - 1)`.
 - **Makespan**: `max_i T_i`.
 
-Every solver but LNS2, which only seeks a feasible plan, takes an `Objective` (`SumOfCosts`
-or `Makespan`). For CBS, both objectives
+Every solver but LNS2 and PIBT, which only seek a feasible plan, takes an `Objective`
+(`SumOfCosts` or `Makespan`). For CBS, both objectives
 use the same low level: each agent's path is the cheapest one under its constraints, so a CT node's makespan is
 a lower bound on the makespan of every solution below it, just as its SoC is for SoC.
 Ordering the CT by makespan is therefore makespan-optimal. Ties go to the lower SoC, but
@@ -394,6 +394,53 @@ it. In a transitive closure an agent above another has strictly fewer agents abo
 sorting by `|higher|` is a topological order. A failed replan drops the child. The cheaper
 child is explored first. PBS is neither optimal nor complete; `Unsolvable` only means an
 agent cannot reach its goal even alone.
+
+## PIBT (Okumura et al. 2019, 2022)
+
+`pibt(instance, budget)`: priority inheritance with backtracking, Algorithm 1 of the
+paper. It plans one time step for all agents at a time and stops at the first step at
+which every agent stands at its goal. No objective, no quality guarantee, not complete.
+
+- **Priorities.** Each step, an agent away from its goal gains 1; one at its goal drops to
+  its tie-breaker. Here the priority is `(steps away from the goal, agent id)`
+  lexicographically, the integer part and a distinct tie-breaker in `[0, 1)` of the paper.
+- **One step.** In decreasing priority, each agent not yet planned runs the recursive
+  procedure: candidates are its vertex and its neighbours (those that reach the goal), by
+  distance to the goal, unoccupied ones first, then by id. It skips vertices claimed for
+  the next step and the current vertex of the agent it inherited from (no swap), claims
+  the next one, and, if an unplanned agent stands there, lets it inherit and plan first.
+  If that agent is stuck, it tries its next candidate; with none left it stays and reports
+  stuck to its own pusher.
+- **Completeness.** The paper proves that on graphs where every pair of adjacent vertices
+  lies on a simple cycle (biconnected ones, for example) every agent reaches its goal at
+  some step; it does not prove that all stand at their goals at once. Off such graphs PIBT
+  can push in circles: in a corridor with a side pocket an agent at its goal is pushed to
+  the dead end and back forever. That case is a unit test, and the hand-made
+  `every_solver_steps_off_a_goal` case skips PIBT for it. `Unsolvable` only means an agent
+  cannot reach its goal even alone.
+- **Budget.** Asked before every time step; `Stats::expanded` counts steps and
+  `Stats::generated` per-agent decisions.
+
+### Paper comparison
+
+| Paper (Okumura et al.) | Here | Status |
+| --- | --- | --- |
+| Priority `p_i`: `+1` away from the goal, reset to `ε_i` at it | `(steps away, agent id)` | same order |
+| Candidates by distance to the goal, presence of an agent as tie-breaker | the same, then by vertex id | same |
+| Skip claimed vertices and the inheritor's current vertex | the same | same |
+| Priority inheritance to an unplanned occupant, backtracking on failure | the same | same |
+| Iterative (lifelong) MAPF and MAPD | one-shot only: stop when all agents stand at their goals | narrower |
+| Random tie-breaks in later versions (as in LaCAM) | deterministic | our choice |
+
+### Tests and measurements
+
+Unit tests: a crowded 5x5 grid with twelve agents, an agent pushed off its goal on a
+cycle, the livelock in a corridor with a pocket, the corridor swap stopping at the budget,
+and trivial instances. PIBT is one of the shared test solvers (oracle property test,
+cross-check, the other hand-made cases) with no guarantee and at most 500 steps in the
+tests, and it runs in the solver fuzz target. On the benchmark's eight-agent instance it
+takes about 58 µs (bench profile, shared machine) for 26 steps, with sum of costs 123
+against the optimum 92.
 
 ## ICTS (Sharon et al. 2013)
 
@@ -817,6 +864,10 @@ already collision-free, so the benchmark (about 140 µs) measures prioritized pl
 
 ## Later algorithms
 
+- **FOCBS** (Jin et al., arXiv:2611.24108): CBS over the agents with goals and a min-cost
+  flow oracle for the agents without, which CBS-TA cannot express yet (issue #11).
+- **PIBT\*_T** (Tao, Yu and Hu, arXiv:2611.23911): PIBT with turn actions, which needs an
+  orientation in the state model (issue #12).
 - **SIPPS** (Li et al. 2022) as the low level of MAPF-LNS2: safe-interval path planning
   with soft obstacles, about five times faster per call than the space-time A* used now.
   SIPP intervals are a different state space, so it is a local module, not a
@@ -906,7 +957,7 @@ lower bound on 4-connected grids. Moves stay 4-connected, as in the MAPF benchma
 
 ## Roadmap
 
-SIPP and SIPPS.
+SIPP and SIPPS, FOCBS (unassigned agents) and PIBT*_T (turn actions).
 
 ## Cross-crate needs
 
@@ -1026,6 +1077,9 @@ level cannot yet (see ECBS).
   prioritization for multi-agent path finding. AAAI 2019. (PBS)
 - G. Wagner, H. Choset. Subdimensional expansion for multirobot path planning.
   Artificial Intelligence 219, 2015. (M*)
+- K. Okumura, M. Machida, X. Défago, Y. Tamura. Priority inheritance with backtracking
+  for iterative multi-agent path finding. IJCAI 2019; extended in arXiv:1901.11282v5,
+  2022. (PIBT)
 - J. Li, Z. Chen, D. Harabor, P. Stuckey, S. Koenig. MAPF-LNS2: fast repairing for
   multi-agent path finding via large neighborhood search. AAAI 2022.
 - M. Goldenberg, A. Felner, R. Stern, G. Sharon, N. Sturtevant, R. Holte, J. Schaeffer.

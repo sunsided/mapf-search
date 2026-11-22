@@ -8,13 +8,13 @@
 [![License](https://img.shields.io/crates/l/mapf-search)](https://github.com/sunsided/mapf-search#license)
 [![unsafe forbidden](https://img.shields.io/badge/unsafe-forbidden-success.svg)](https://github.com/rust-secure-code/safety-dance/)
 
-Multi-agent pathfinding: CBS, CBS-TA, ECBS, ICTS, PBS, M\*, EPEA\*, MAPF-LNS2 and
+Multi-agent pathfinding: CBS, CBS-TA, ECBS, ICTS, PBS, PIBT, M\*, EPEA\*, MAPF-LNS2 and
 multi-objective MO-CBS on grids and general graphs.
 
 Given a graph and a set of agents with start and goal vertices, the solvers find one path per
 agent so that no two agents ever share a vertex or swap along an edge. CBS, ICTS, M\* and
 EPEA\* minimize the sum of costs or the makespan, ECBS stays within a given factor of the optimum,
-and PBS and MAPF-LNS2 trade optimality for speed. CBS-TA also picks the goals: each agent gets one of its
+and PBS, PIBT and MAPF-LNS2 trade optimality for speed. CBS-TA also picks the goals: each agent gets one of its
 candidate goals, optimally over all assignments. The optimal solvers are checked against a joint-space oracle by
 property tests, and M\* and EPEA\* also prove when an instance has no solution. The crate is
 `no_std` with `alloc`, uses the A\* of
@@ -63,6 +63,8 @@ mapf-search = "0.1"
   `cbs_ta_with`, `TaskInstance`)
 - ECBS, bounded-suboptimal, focal search at both levels (`ecbs`)
 - PBS, priority-based search: fast, neither optimal nor complete (`pbs`)
+- PIBT, priority inheritance with backtracking: plans one time step for all agents at a
+  time, very fast, neither optimal nor complete (`pibt`)
 - MAPF-LNS2, large neighborhood search repair: starts from a plan with collisions and
   replans a few agents at a time until none are left; seeded, neither optimal nor complete
   (`lns2`, `Lns2Config`)
@@ -76,8 +78,8 @@ mapf-search = "0.1"
   from `multiobjective-search`, with an opt-in feasibility check (proves unsolvability),
   conflict prioritization, bypass and disjoint splitting (`mo_cbs`, `mo_cbs_with`,
   `mo_cbs_per_agent`, `MoCbsConfig`; optional feature `multi-objective`)
-- Every single-objective solver except MAPF-LNS2, which only seeks a feasible plan, takes
-  an `Objective`: sum of costs or makespan
+- Every single-objective solver except MAPF-LNS2 and PIBT, which only seek a feasible plan,
+  takes an `Objective`: sum of costs or makespan
 - Shared parts: conflict detection, constraints, space-time A* low level, MDDs, Moving AI
   `.map`/`.scen` parsers
 

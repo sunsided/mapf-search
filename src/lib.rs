@@ -27,14 +27,16 @@
 //!   prove unsolvability; it generates only the children at a node's stored `f`.
 //! - [`lns2()`]: MAPF-LNS2, large neighborhood search that repairs a plan with collisions
 //!   a few agents at a time; seeded ([`Lns2Config`]), neither optimal nor complete.
+//! - [`pibt()`]: priority inheritance with backtracking, one time step for all agents at a
+//!   time; very fast, neither optimal nor complete.
 //! - [`pbs()`]: priority-based search, fast but neither optimal nor complete.
 //! - `mo_cbs`, `mo_cbs_with` and `mo_cbs_per_agent`, with the `multi-objective` feature:
 //!   multi-objective CBS (MO-CBS and MO-CBS-t, over BOA* or NAMOA*dr), every
 //!   Pareto-optimal plan when moves and waits cost vectors, shared or per agent, with an
 //!   opt-in feasibility check, conflict prioritization, bypass and disjoint splitting.
 //!
-//! Every solver but [`lns2()`], which only seeks a feasible plan, takes an [`Objective`]:
-//! sum of costs or makespan.
+//! Every solver but [`lns2()`] and [`pibt()`], which only seek a feasible plan, takes an
+//! [`Objective`]: sum of costs or makespan.
 //! - [`space_time_astar`]: the single-agent low level under [`Constraint`]s, built on the
 //!   `heuristic-search` crate's A*.
 //! - [`first_conflict`] and [`conflicts`]: conflict detection on any set of paths.
@@ -99,6 +101,7 @@ mod movingai;
 mod mstar;
 mod path;
 mod pbs;
+mod pibt;
 mod solution;
 
 pub use cbs::{CbsConfig, CbsHeuristic, Splitting, cbs, cbs_ta, cbs_ta_with, cbs_with};
@@ -124,4 +127,5 @@ pub use movingai::{
 pub use mstar::{MStarConfig, mstar, mstar_with};
 pub use path::{Objective, Path, Time, makespan, path_cost, position_at, sum_of_costs};
 pub use pbs::pbs;
+pub use pibt::pibt;
 pub use solution::{MapfResult, Outcome, Solution};
