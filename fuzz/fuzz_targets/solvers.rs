@@ -1,6 +1,6 @@
 //! Fuzzes the solvers on tiny grids built from raw bytes: every plan a solver returns must be
 //! valid (each path runs from the agent's start to its goal, each step waits or moves to a
-//! neighbouring cell, moves run between free cells, and no two paths conflict), and the optimal solvers (CBS, ICTS and M*) must
+//! neighbouring cell, moves run between free cells, and no two paths conflict), and the optimal solvers (CBS, ICTS, M* and EPEA*) must
 //! report the same cost whenever more than one of them solves the instance within its
 //! budget. CBS-TA runs on the same agents with every agent's goal as a candidate of every
 //! agent: its plan must end each agent at a distinct one, and cost no more than CBS's. Blocked cells are vertices without edges, so an agent whose start is its goal
@@ -12,7 +12,7 @@
 use libfuzzer_sys::fuzz_target;
 use mapf_search::{
     Agent, Grid, Instance, Limits, MapfResult, Objective, TaskAgent, TaskInstance, Weight, cbs,
-    cbs_ta, ecbs, first_conflict, icts, mstar, pbs,
+    cbs_ta, ecbs, epea, first_conflict, icts, mstar, pbs,
 };
 
 /// The most columns and rows a fuzzed grid has.
@@ -151,6 +151,7 @@ fuzz_target!(|data: &[u8]| {
         ("cbs", cbs(&instance, objective, budget())),
         ("icts", icts(&instance, objective, budget())),
         ("mstar", mstar(&instance, objective, budget())),
+        ("epea", epea(&instance, objective, budget())),
     ];
     for (solver, result) in &optimal {
         assert_valid(&instance, result, solver);

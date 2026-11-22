@@ -2,7 +2,7 @@
 
 Multi-agent pathfinding (MAPF): find one path per agent so that no two agents collide,
 minimizing a joint objective. This crate hosts the conflict-based family (CBS, CBS-TA,
-ECBS, MO-CBS), ICTS, PBS and M*; MAPF-LNS2 and EPEA* are on the roadmap.
+ECBS, MO-CBS), ICTS, PBS, M* and EPEA*; MAPF-LNS2 is on the roadmap.
 
 These algorithms share the problem model, path conflicts, joint objectives, constraints
 and reservations, and the single-agent low-level search. They do **not** share one search
@@ -69,8 +69,8 @@ The other solvers:
 - **ICTS** searches the chain of vectors `(m, ..., m)` from the largest individual optimum
   on. An MDD of depth `m` contains the paths that arrive earlier and wait, so the first
   solvable `m` is the optimal makespan.
-- **M\*** solves makespan through sum of costs under deadlines (see M*). Its plan also
-  has the least sum of costs among the makespan-optimal plans.
+- **M\*** and **EPEA\*** solve makespan through sum of costs under deadlines (see M*).
+  Their plans also have the least sum of costs among the makespan-optimal plans.
 
 The other solvers do not minimize the sum of costs among the makespan-optimal plans.
 
@@ -537,6 +537,54 @@ one sum-of-costs search: rM* 30 ms instead of 83 s, basic M* 330 ms, OD-M* 25 ms
 deadline search that fails must exhaust its time-expanded space, so instances whose
 optimal makespan is far above `L` cost more.
 
+## EPEA* (Goldenberg et al. 2014)
+
+`epea(instance, objective, budget)`: A* in the joint space of all agents, with enhanced
+partial expansion. States and pricing are those of M*: every agent's vertex and finished
+flag, finishing at the goal is free, every other unfinished agent pays 1 per step, and the
+heuristic is the sum of the unfinished agents' distances. Makespan uses M*'s deadline
+searches. The joint space is finite, so EPEA* proves unsolvability, like M*.
+
+- **Partial expansion.** A node stores `F`, initially its `f`. Expanding it generates only
+  the children with `f = F`; then `F` becomes the next larger `f` among its children and
+  the node goes back into the open list, or is closed if there is none. Each partial
+  expansion counts once in `Stats::expanded`. Ties in `F` go to the smaller `h`.
+- **Operator selection function** (`epea/osf.rs`). With the sum of distances as
+  heuristic, a joint step raises `f` by the sum of the agents' own rises: `1 + d(next) -
+  d(here)` for a move or wait, never negative and at most `2` on an undirected graph (a
+  directed edge into a one-way detour can raise it more), and `0` for finishing or staying
+  finished. Each agent's moves are sorted by rise; a depth-first search over the agents
+  picks one move each, keeps the remaining target within the remaining agents' least and
+  most total rise, and drops colliding combinations (same vertex, or a swap) as it goes.
+  The next `F` is the smallest achievable total rise above the current one, from a
+  subset-sum over the agents' rise sets, collisions ignored: a node whose children at
+  some `F` all collide is just expanded again at the next one.
+- **Duplicates.** States are kept in a `BTreeMap` with their best `g`. With a consistent
+  heuristic and pops in order of `F`, a state is first generated with its optimal `g`; a
+  cheaper path would still reopen it (`Stats::reopened`), but none occurs in the tests.
+
+### Paper comparison
+
+| Paper (Goldenberg et al. 2014) | Here | Status |
+| --- | --- | --- |
+| Stored value `F(n)`, initially `f(n)`; expand generates children with `f = F(n)`, then `F(n)` becomes the next value or `n` is closed | the same | same |
+| MAPF operator selection: per-agent rises of `f` under the sum of individual costs, combined to the target | the same, with goal-stay finishing at rise 0 | same |
+| Collisions checked on generated children | checked while combining agent moves | same result, earlier pruning |
+| Next `F` from the OSF, regardless of collisions | subset-sum over the agents' rise sets | same |
+| Sum of individual costs | sum of costs, plus makespan via M*'s deadline searches | generalized |
+| Plain joint state per time step | M*'s states with finished flags (goal-stay); time only under a deadline | same model as the oracle |
+
+### Tests and measurements
+
+EPEA* is one of the solvers of the shared tests: the hand-made cases (stepping off a goal,
+passing a finished goal, an unreachable goal, the corridor swap, which it proves
+unsolvable), the property test against the joint-space oracle for both objectives, the
+cross-check against CBS, ICTS and M* on larger grids, and the solver fuzz target. On the
+benchmark's eight-agent instance it takes about 6 ms (bench profile, shared machine):
+1 592 expansions and 11 686 generated children for the optimal sum of costs 92, against
+about 12 s and 5.4 million expansions for ODrM*. That makespan is also the lower bound, so
+no deadline search runs.
+
 ## MO-CBS (Ren, Rathinam and Choset 2021)
 
 Multi-objective MAPF: every move and wait costs a vector of `N` objectives, and the
@@ -714,9 +762,6 @@ built, so the checks inside the low level see completed expansions only and
   SIPPS, keep the result if collisions drop. Needs SIPP (safe-interval path planning) as
   a second low level; SIPP intervals are a different state space, so it is a local
   module, not a heuristic-search adapter.
-- **EPEA*** (Goldenberg et al. 2014): partial expansion A* for the joint space, using
-  operator selection functions to generate only children with `f = F`. Useful for joint
-  search and as an ICTS/M* alternative. Belongs in heuristic-search if it is generic.
 
 ## Benchmarks: Moving AI format
 
@@ -755,7 +800,7 @@ lower bound on 4-connected grids. Moves stay 4-connected, as in the MAPF benchma
 - **Properties** (proptest, case count fixed in code), for every solver behind one
   `Solver` enum in the tests: plain and improved CBS (also with WDG), each CBS
   improvement alone (plus bypass and WDG each with disjoint splitting), ECBS at `w = 1`
-  and at `w` in {1.1, 1.5, 2, 3}, ICTS, basic and recursive M* and PBS, each for both
+  and at `w` in {1.1, 1.5, 2, 3}, ICTS, basic and recursive M*, EPEA* and PBS, each for both
   objectives. When
   the oracle finds an optimum, a solved plan must pass the plan checker and be within the
   solver's guarantee: equal for the optimal solvers, at most `w` times for ECBS, at least
@@ -802,7 +847,7 @@ lower bound on 4-connected grids. Moves stay 4-connected, as in the MAPF benchma
 
 ## Roadmap
 
-SIPP, MAPF-LNS2 and EPEA*.
+SIPP and MAPF-LNS2.
 
 ## Cross-crate needs
 
@@ -924,7 +969,8 @@ level cannot yet (see ECBS).
   Artificial Intelligence 219, 2015. (M*)
 - J. Li, Z. Chen, D. Harabor, P. Stuckey, S. Koenig. MAPF-LNS2: fast repairing for
   multi-agent path finding via large neighborhood search. AAAI 2022.
-- M. Goldenberg et al. Enhanced partial expansion A*. JAIR 50, 2014. (EPEA*)
+- M. Goldenberg, A. Felner, R. Stern, G. Sharon, N. Sturtevant, R. Holte, J. Schaeffer.
+  Enhanced partial expansion A*. JAIR 50, 2014. (EPEA*)
 - D. Silver. Cooperative pathfinding. AIIDE 2005. (space-time A*, reservation tables)
 - M. Phillips, M. Likhachev. SIPP: safe interval path planning for dynamic
   environments. ICRA 2011.

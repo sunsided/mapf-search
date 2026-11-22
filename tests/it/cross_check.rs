@@ -153,6 +153,7 @@ proptest! {
             Solver::MStar(MStarConfig::basic(objective)),
             Solver::MStar(MStarConfig::recursive(objective)),
             Solver::MStar(MStarConfig::od_recursive(objective)),
+            Solver::Epea(objective),
         ];
         let others = [
             Solver::Ecbs(objective, Weight::new(3, 2)),
