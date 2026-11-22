@@ -8,13 +8,14 @@
 [![License](https://img.shields.io/crates/l/mapf-search)](https://github.com/sunsided/mapf-search#license)
 [![unsafe forbidden](https://img.shields.io/badge/unsafe-forbidden-success.svg)](https://github.com/rust-secure-code/safety-dance/)
 
-Multi-agent pathfinding: CBS, ECBS, ICTS, PBS, M\* and multi-objective MO-CBS on grids and
-general graphs.
+Multi-agent pathfinding: CBS, CBS-TA, ECBS, ICTS, PBS, M\* and multi-objective MO-CBS on
+grids and general graphs.
 
 Given a graph and a set of agents with start and goal vertices, the solvers find one path per
 agent so that no two agents ever share a vertex or swap along an edge. CBS, ICTS and M\*
 minimize the sum of costs or the makespan, ECBS stays within a given factor of the optimum,
-and PBS trades optimality for speed. The optimal solvers are checked against a joint-space oracle by
+and PBS trades optimality for speed. CBS-TA also picks the goals: each agent gets one of its
+candidate goals, optimally over all assignments. The optimal solvers are checked against a joint-space oracle by
 property tests, and M\* also proves when an instance has no solution. The crate is
 `no_std` with `alloc`, uses the A\* of
 [heuristic-search](https://github.com/sunsided/heuristic-search) as its single-agent low
@@ -57,6 +58,9 @@ mapf-search = "0.1"
   bypass, the CG, DG and WDG heuristics, a conflict avoidance table and disjoint
   splitting (with positive constraints), each switchable (`cbs`, `cbs_with`,
   `CbsConfig`)
+- CBS-TA, conflict-based search with task assignment: each agent has candidate goals, and
+  the plan is optimal over all assignments, for sum of costs or makespan (`cbs_ta`,
+  `cbs_ta_with`, `TaskInstance`)
 - ECBS, bounded-suboptimal, focal search at both levels (`ecbs`)
 - PBS, priority-based search: fast, neither optimal nor complete (`pbs`)
 - ICTS with pairwise pruning, optimal (`icts`)
@@ -71,8 +75,8 @@ mapf-search = "0.1"
 - Shared parts: conflict detection, constraints, space-time A* low level, MDDs, Moving AI
   `.map`/`.scen` parsers
 
-Not yet implemented: CBS-TA (conflict-based search with task assignment), MAPF-LNS2
-(large neighborhood search repair) and EPEA\* (enhanced partial expansion).
+Not yet implemented: MAPF-LNS2 (large neighborhood search repair) and EPEA\* (enhanced
+partial expansion).
 
 ## Usage
 

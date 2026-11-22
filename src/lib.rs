@@ -14,6 +14,9 @@
 //!   ([`CbsHeuristic`]), a conflict
 //!   avoidance table and disjoint [`Splitting`]; [`cbs_with`] and [`CbsConfig`] switch
 //!   them individually.
+//! - [`cbs_ta()`]: CBS with task assignment over a [`TaskInstance`], whose agents each have
+//!   candidate goals; optimal over all assignments, with every [`CbsConfig`] improvement
+//!   ([`cbs_ta_with`]).
 //! - [`ecbs()`]: enhanced CBS, bounded-suboptimal within a [`Weight`] `w`, with focal search
 //!   at both levels.
 //! - [`icts()`]: increasing cost tree search with pairwise pruning, optimal.
@@ -59,7 +62,7 @@
 //! # Ok::<(), mapf_search::InstanceError>(())
 //! ```
 //!
-//! Not yet implemented: CBS-TA, MAPF-LNS2 and EPEA*.
+//! Not yet implemented: MAPF-LNS2 and EPEA*.
 //!
 //! Repository: <https://github.com/sunsided/mapf-search>
 
@@ -73,6 +76,7 @@ extern crate alloc;
 #[doc = include_str!("../README.md")]
 mod readme_doctests {}
 
+mod assignment;
 mod cbs;
 mod conflict;
 mod conflict_table;
@@ -92,14 +96,14 @@ mod path;
 mod pbs;
 mod solution;
 
-pub use cbs::{CbsConfig, CbsHeuristic, Splitting, cbs, cbs_with};
+pub use cbs::{CbsConfig, CbsHeuristic, Splitting, cbs, cbs_ta, cbs_ta_with, cbs_with};
 pub use conflict::{Conflict, conflicts, first_conflict};
 pub use constraint::{Constraint, ConstraintSet};
 pub use ecbs::ecbs;
 pub use graph::{AdjacencyList, Graph, Grid, Vertex};
 pub use heuristic_search::{Budget, Limits, Stats, Weight};
 pub use icts::icts;
-pub use instance::{Agent, AgentId, Instance, InstanceError};
+pub use instance::{Agent, AgentId, Instance, InstanceError, TaskAgent, TaskInstance};
 pub use low_level::space_time_astar;
 #[cfg(feature = "multi-objective")]
 pub use mo_cbs::{
