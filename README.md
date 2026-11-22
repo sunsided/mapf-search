@@ -21,6 +21,8 @@ property tests, and M\* and EPEA\* also prove when an instance has no solution. 
 [heuristic-search](https://github.com/sunsided/heuristic-search) as its single-agent low
 level, and reads the Moving AI `.map` and `.scen` benchmark formats.
 
+Part of the [planning and search crates](https://sunsided.github.io/planning-and-search/); see also this crate's [overview page](https://sunsided.github.io/planning-and-search/crates/mapf-search/).
+
 ## Who this is for
 
 - Robotics and warehouse automation: fleets of mobile robots or AGVs on a grid or a roadmap
