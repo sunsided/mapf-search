@@ -7,9 +7,9 @@
 //! starts at the node's own `f`. The node is then put back with `F` raised to the next
 //! larger `f` among its children, or closed if there is none. The children with a given
 //! `f` come from an operator selection function ([`Operators`]) that works per agent: the
-//! heuristic is the sum of the agents' distances, so each agent's move raises `f` by `0`,
-//! `1` or `2`, and the joint moves with a given rise are the combinations that add up to
-//! it.
+//! heuristic is the sum of the agents' distances, so each agent's move raises `f` by a
+//! small amount of its own (`0`, `1` or `2` on an undirected graph), and the joint moves
+//! with a given rise are the combinations that add up to it.
 //!
 //! Joint states and pricing are those of [`mstar`](crate::mstar()): every agent's vertex
 //! plus a *finished* flag. An unfinished agent at its goal may finish, and stays there for

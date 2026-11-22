@@ -3,9 +3,10 @@
 //! given amount.
 //!
 //! With the sum of distances as heuristic, a joint step raises `f` by the sum of what each
-//! agent's own move raises it by: `1 + d(next) - d(here)` for a move or a wait (`0`, `1` or
-//! `2`, as the distance changes by at most one per step), `0` for finishing at the goal or
-//! staying finished. So the joint moves with a given rise are the combinations of agent
+//! agent's own move raises it by: `1 + d(next) - d(here)` for a move or a wait, `0` for
+//! finishing at the goal or staying finished. A step lowers the distance by at most one, so
+//! a rise is never negative; on an undirected graph it is at most `2`, on a directed one it
+//! can be larger (an edge into a long one-way detour). So the joint moves with a given rise are the combinations of agent
 //! moves whose rises add up to it, found by a depth-first search that skips combinations
 //! whose remaining agents cannot reach the target, and colliding ones.
 
@@ -63,7 +64,8 @@ impl Operators {
     pub(super) fn next_rise(&self, rise: u32) -> Option<u32> {
         let mut reachable = vec![true];
         for list in &self.moves {
-            let mut next = vec![false; reachable.len() + 2];
+            let widest = list.last().map_or(0, |step| step.rise as usize);
+            let mut next = vec![false; reachable.len() + widest];
             for (sum, _) in reachable
                 .iter()
                 .enumerate()
@@ -82,7 +84,7 @@ impl Operators {
             .enumerate()
             .skip(rise as usize + 1)
             .find(|(_, reached)| **reached)
-            .map(|(sum, _)| u32::try_from(sum).expect("rises are at most 2 per agent"))
+            .map(|(sum, _)| u32::try_from(sum).expect("rise sums fit in u32"))
     }
 
     /// Every collision-free joint move whose rises add up to `rise`, one move per agent.
@@ -161,6 +163,19 @@ mod tests {
         assert_eq!(operators.next_rise(0), Some(1));
         assert_eq!(operators.next_rise(1), Some(2));
         assert_eq!(operators.next_rise(2), None);
+    }
+
+    /// Rises above 2, as on a directed graph, are combined like any other.
+    #[test]
+    fn handles_rises_above_two() {
+        let operators = Operators::new(vec![
+            vec![step(0, 4, 0), step(0, 1, 3)],
+            vec![step(2, 2, 1)],
+        ]);
+
+        assert_eq!(operators.next_rise(1), Some(4));
+        assert_eq!(operators.with_rise(4).len(), 1);
+        assert_eq!(operators.next_rise(4), None);
     }
 
     /// A swap along an edge collides.

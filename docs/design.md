@@ -503,7 +503,8 @@ searches. The joint space is finite, so EPEA* proves unsolvability, like M*.
   expansion counts once in `Stats::expanded`. Ties in `F` go to the smaller `h`.
 - **Operator selection function** (`epea/osf.rs`). With the sum of distances as
   heuristic, a joint step raises `f` by the sum of the agents' own rises: `1 + d(next) -
-  d(here)` for a move or wait, so `0`, `1` or `2`, and `0` for finishing or staying
+  d(here)` for a move or wait, never negative and at most `2` on an undirected graph (a
+  directed edge into a one-way detour can raise it more), and `0` for finishing or staying
   finished. Each agent's moves are sorted by rise; a depth-first search over the agents
   picks one move each, keeps the remaining target within the remaining agents' least and
   most total rise, and drops colliding combinations (same vertex, or a swap) as it goes.

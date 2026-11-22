@@ -159,6 +159,23 @@ fn every_solver_passes_a_finished_goal() {
     check_all(&graph, &agents);
 }
 
+/// On a directed graph a step can raise the sum-of-distances `f` by more than 2: the edge
+/// `0 -> 1` leads into a one-way detour three steps longer than the shortcut `0 -> 4`.
+///
+/// ```text
+/// 0 -> 4, 0 -> 1 -> 2 -> 3 -> 4
+/// ```
+#[test]
+fn every_solver_handles_a_one_way_detour() {
+    let graph = AdjacencyList::directed(5, &[(0, 4), (0, 1), (1, 2), (2, 3), (3, 4)]);
+
+    check_all(&graph, &[Agent { start: 0, goal: 4 }]);
+    check_all(
+        &graph,
+        &[Agent { start: 0, goal: 4 }, Agent { start: 1, goal: 3 }],
+    );
+}
+
 /// A goal behind a wall is proven unreachable.
 #[test]
 fn every_solver_proves_an_unreachable_goal() {
