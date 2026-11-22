@@ -66,8 +66,9 @@ mapf-search = "0.1"
 - PIBT, priority inheritance with backtracking: plans one time step for all agents at a
   time, very fast, neither optimal nor complete (`pibt`)
 - MAPF-LNS2, large neighborhood search repair: starts from a plan with collisions and
-  replans a few agents at a time until none are left; seeded, neither optimal nor complete
-  (`lns2`, `Lns2Config`)
+  replans a few agents at a time with SIPPS (safe interval path planning with soft
+  obstacles) until none are left; seeded, neither optimal nor complete (`lns2`,
+  `Lns2Config`)
 - ICTS with pairwise pruning, optimal (`icts`)
 - M*, basic and recursive (rM*), each with or without operator decomposition (OD-M*,
   ODrM*), optimal, proves unsolvability (`mstar`, `mstar_with`, `MStarConfig`)

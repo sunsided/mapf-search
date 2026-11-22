@@ -1,5 +1,5 @@
-//! Benchmarks: every solver on one fixed 8x8 instance with eight agents. Run with
-//! `cargo bench`.
+//! Benchmarks: every solver on one fixed 8x8 instance with eight agents, and MAPF-LNS2 also
+//! on a crowded one whose initial plan collides. Run with `cargo bench`.
 
 use std::hint::black_box;
 
@@ -49,13 +49,27 @@ fn anonymous(instance: &Instance<Grid>) -> TaskInstance<Grid> {
     TaskInstance::new(instance.graph().clone(), agents).expect("valid")
 }
 
+/// Twenty-four agents on a free 8x8 grid, from the first three rows to the mirrored cells
+/// of the last three: prioritized planning leaves collisions that LNS2 must repair.
+fn crowded() -> Instance<Grid> {
+    let agents = (0..24)
+        .map(|i| Agent {
+            start: i,
+            goal: 63 - i,
+        })
+        .collect();
+
+    Instance::new(Grid::new(8, 8), agents).expect("valid")
+}
+
 /// Benchmarks every solver.
 fn main() {
     let instance = instance();
     let tasks = anonymous(&instance);
+    let crowded = crowded();
     let budget = || Limits::expansions(100_000);
     let soc = Objective::SumOfCosts;
-    let solvers: [(&str, &dyn Fn() -> MapfResult); 13] = [
+    let solvers: [(&str, &dyn Fn() -> MapfResult); 14] = [
         ("cbs plain", &|| {
             cbs_with(&instance, CbsConfig::plain(soc), budget())
         }),
@@ -68,6 +82,9 @@ fn main() {
         }),
         ("pbs", &|| pbs(&instance, soc, budget())),
         ("lns2", &|| lns2(&instance, Lns2Config::default(), budget())),
+        ("lns2 crowded", &|| {
+            lns2(&crowded, Lns2Config::default(), budget())
+        }),
         ("pibt", &|| pibt(&instance, budget())),
         ("icts", &|| icts(&instance, soc, budget())),
         ("epea", &|| epea(&instance, soc, budget())),
