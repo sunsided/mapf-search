@@ -10,7 +10,7 @@
 //!    failure-based or random; see [`neighborhood`]), chosen by adaptive LNS: each method
 //!    has a weight, raised by the collisions it removes;
 //! 2. replans those agents one after another in a random order, each with the fewest
-//!    collisions with every other current path ([`low_level`]);
+//!    collisions with every other current path, by SIPPS ([`sipps`](mod@sipps));
 //! 3. keeps the new paths if the number of colliding agent pairs did not grow, else
 //!    restores the old ones.
 //!
@@ -30,24 +30,25 @@
 //!     weight --> count
 //! ```
 
+#[cfg(test)]
 mod low_level;
 mod neighborhood;
 mod random;
+mod sipps;
 
 use alloc::vec;
 use alloc::vec::Vec;
 
 use heuristic_search::{Budget, Stats};
 
-use self::low_level::fewest_collisions;
 use self::neighborhood::Method;
 use self::random::Random;
+use self::sipps::{Obstacles, sipps};
 use crate::conflict::conflicts;
-use crate::conflict_table::ConflictTable;
 use crate::graph::Graph;
 use crate::instance::{AgentId, Instance};
 use crate::low_level::distance_tables;
-use crate::path::{Path, Time};
+use crate::path::Path;
 use crate::solution::{MapfResult, Outcome, Solution};
 
 /// How fast the adaptive weights follow recent success: the paper's reaction factor `γ`.
@@ -227,17 +228,14 @@ impl<G: Graph> Repair<'_, G> {
                 .enumerate()
                 .filter(|(other, path)| !path.is_empty() && !pending.contains(other))
                 .map(|(_, path)| path);
-            let table = ConflictTable::of(others.clone());
-            let last = others.map(Vec::len).max().unwrap_or(0);
-            let last = Time::try_from(last).expect("path lengths fit in u32 time steps");
+            let obstacles = Obstacles::of(others);
 
             self.stats.generated += 1;
-            self.paths[agent] = fewest_collisions(
+            self.paths[agent] = sipps(
                 self.instance.graph(),
                 self.instance.agents()[agent],
                 &self.distances[agent],
-                &table,
-                last,
+                &obstacles,
             )
             .expect("every goal is reachable");
         }

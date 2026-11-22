@@ -43,6 +43,7 @@ impl ConflictTable {
     }
 
     /// The table of `paths`, each non-empty.
+    #[cfg(test)]
     pub(crate) fn of<'p>(paths: impl IntoIterator<Item = &'p Path>) -> Self {
         let mut table = Self::default();
         for path in paths {

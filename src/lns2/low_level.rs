@@ -1,5 +1,7 @@
-//! The low level of MAPF-LNS2 ([`fewest_collisions`]): a path for one agent with the fewest
-//! collisions with a fixed set of other paths, then the earliest arrival.
+//! The test oracle of SIPPS ([`fewest_collisions`]): a path for one agent with exactly the
+//! fewest collisions with a fixed set of other paths, then the earliest arrival. MAPF-LNS2
+//! used it as its low level before SIPPS; it is several times slower per call on crowded
+//! grids, but its collision count is exact.
 //!
 //! This is the problem the paper calls pathfinding with mixed dynamic obstacles, with soft
 //! obstacles only. It is solved by space-time A* with search-core's [`Lexicographic`]

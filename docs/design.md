@@ -2,8 +2,8 @@
 
 Multi-agent pathfinding (MAPF): find one path per agent so that no two agents collide,
 minimizing a joint objective. This crate hosts the conflict-based family (CBS, CBS-TA,
-ECBS, MO-CBS), ICTS, PBS, PIBT, M*, EPEA* and MAPF-LNS2; SIPPS, a faster low level for
-MAPF-LNS2, FOCBS and the turn-aware PIBT*_T are on the roadmap.
+ECBS, MO-CBS), ICTS, PBS, PIBT, M*, EPEA* and MAPF-LNS2 (over SIPPS); FOCBS and the
+turn-aware PIBT*_T are on the roadmap.
 
 These algorithms share the problem model, path conflicts, joint objectives, constraints
 and reservations, and the single-agent low-level search. They do **not** share one search
@@ -819,12 +819,23 @@ other alone). It returns `Unsolvable` only for a goal unreachable even alone.
   collisions with the agents before it. Where an agent can avoid them all, this is the
   shortest collision-free path that PP with SIPP would find; where it cannot, it is the
   paper's fallback of planning the rest with the fewest collisions.
-- **Low level** (`lns2/low_level.rs`). Space-time A* over `(vertex, time, finished)` with
-  search-core's `Lexicographic` cost: collisions with the other paths (the shared
-  `ConflictTable`: vertices, parked agents, swaps; finishing counts the later visits of
-  the goal), then time steps. The horizon is the end of the longest other path plus the
-  vertex count; after it nothing moves, and a simple path reaches the goal with no more
-  collisions than a longer one.
+- **Low level: SIPPS** (`lns2/sipps.rs`), the paper's Algorithms 1-3. The other paths
+  become soft obstacles: steps at vertices, parked agents (target obstacles) and swaps
+  (edge obstacles); there are no hard ones. Each vertex's timeline is cut into maximal
+  safe intervals that are dirty (an obstacle at every step) or clean, built lazily and
+  shared for vertices nobody visits. Nodes are `(vertex, interval, goal flag)` with the
+  earliest arrival as `g` and a collision count `c` (one per dirty interval entered, one
+  per swap); the open list orders by `c`, then `f`. A move whose early arrivals swap
+  splits into two nodes, before and after the last swapping step. Twins (same vertex,
+  interval and goal flag) prune each other by dominance and trim overlapping intervals.
+  `h` is the distance to the goal, raised for `c = 0` to the time the goal is last
+  visited. A node at the goal finishes at once if nobody comes later, else becomes a goal
+  node charged with the later visits.
+- **Exactness.** SIPPS guarantees a path when one exists and the shortest collision-free
+  one when one exists; otherwise its count is an approximation (waiting through several
+  dirty steps of one interval counts once), as the paper notes. The former space-time A*
+  with a (collisions, time) `Lexicographic` cost, which counts exactly, stays as a test
+  oracle (`lns2/low_level.rs`, test builds only).
 - **Iteration.** A method is drawn by its adaptive weight, builds a neighborhood, and the
   neighborhood is replanned by prioritized planning in a random order against every other
   current path. The new plan is kept if its number of colliding pairs did not grow. The
@@ -843,7 +854,8 @@ other alone). It returns `Unsolvable` only for a goal unreachable even alone.
 | Paper (Li et al. 2022) | Here | Status |
 | --- | --- | --- |
 | Initial plan from a MAPF algorithm (PP), the rest planned with fewest collisions | PP where every agent takes its fewest-collision path | same result |
-| SIPPS low level (soft obstacles, safe intervals) | space-time A* with (collisions, time) cost, the paper's Experiment 1 baseline | slower per call, follow-up |
+| SIPPS low level (soft obstacles, safe intervals), Algorithms 1-3 | the same, soft obstacles only | same |
+| Space-time A* as the baseline of Experiment 1 | kept as the test oracle of SIPPS | same role |
 | Replan the neighborhood with PP in a random order | the same | same |
 | Accept if the colliding pairs do not grow | the same | same |
 | Collision-based, failure-based and random neighborhoods | the same | same |
@@ -859,8 +871,19 @@ most `N`, a colliding agent included where the method starts from one) and full 
 crowded 5x5 grid with twelve agents, for several seeds and sizes: valid, and the same
 result for the same seed. LNS2 is one of the shared test solvers (hand-made cases, oracle
 property test, cross-check) with no guarantee and, in the tests, at most 500 iterations,
-and it runs in the solver fuzz target. On the benchmark instance the initial plan is
-already collision-free, so the benchmark (about 140 µs) measures prioritized planning.
+and it runs in the solver fuzz target. A property test checks SIPPS against the exact
+space-time A* on 4x4 grids with random walks: a path exactly when A* finds one, valid,
+never fewer collisions than the minimum, and the same zero-collision length where A*
+finds a path without collisions (the paper's Theorem 2).
+
+The benchmark has two LNS2 cases: the eight-agent instance, whose initial plan is already
+collision-free (prioritized planning only), and `lns2 crowded`, 24 agents across a free
+8x8 grid, whose plan needs repairs. Crowded grids are where SIPPS pays off: with 64
+agents on a free 16x16 grid (from the first rows to the mirrored cells), one run took
+about 2-4 s with SIPPS and 30 s with the space-time A* (shared machine, noisy), roughly
+3 ms against 37 ms per single-agent search; with 96 agents, SIPPS took about 15 s and the
+A* run was stopped after 9 minutes. On sparse instances SIPPS's interval bookkeeping
+makes it up to about twice as slow per call as A*, at a few microseconds.
 
 ## Later algorithms
 
@@ -868,10 +891,6 @@ already collision-free, so the benchmark (about 140 µs) measures prioritized pl
   flow oracle for the agents without, which CBS-TA cannot express yet (issue #11).
 - **PIBT\*_T** (Tao, Yu and Hu, arXiv:2611.23911): PIBT with turn actions, which needs an
   orientation in the state model (issue #12).
-- **SIPPS** (Li et al. 2022) as the low level of MAPF-LNS2: safe-interval path planning
-  with soft obstacles, about five times faster per call than the space-time A* used now.
-  SIPP intervals are a different state space, so it is a local module, not a
-  heuristic-search adapter.
 
 ## Benchmarks: Moving AI format
 
@@ -957,7 +976,7 @@ lower bound on 4-connected grids. Moves stay 4-connected, as in the MAPF benchma
 
 ## Roadmap
 
-SIPP and SIPPS, FOCBS (unassigned agents) and PIBT*_T (turn actions).
+FOCBS (unassigned agents) and PIBT*_T (turn actions).
 
 ## Cross-crate needs
 
