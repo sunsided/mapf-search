@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0](https://github.com/sunsided/mapf-search/compare/v0.1.0...v0.2.0) - 2026-11-22
+
+### Added
+
+- Add PIBT, priority inheritance with backtracking
+- Add MAPF-LNS2, large neighborhood search repair
+- Add EPEA*, enhanced partial expansion A* in the joint space
+- Add CBS-TA, conflict-based search with task assignment
+
+### Changed
+
+- Plan LNS2 agents with SIPPS instead of space-time A*
+- Describe the actual retry bounds of the LNS2 neighborhoods
+- Rank the empty assignment for makespan without agents
+- List CBS-TA among the hosted algorithms in the design overview
+
+### Fixed
+
+- Fix EPEA* rises above 2 on directed graphs
+
 ## [0.1.0](https://github.com/sunsided/mapf-search/releases/tag/v0.1.0) - 2026-11-22
 
 ### Added
