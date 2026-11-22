@@ -4,7 +4,8 @@
 //! report the same cost whenever more than one of them solves the instance within its
 //! budget. CBS-TA runs on the same agents with every agent's goal as a candidate of every
 //! agent: its plan must end each agent at a distinct one, and cost no more than CBS's. ECBS,
-//! PBS, LNS2 and PIBT must return valid plans. Blocked cells are vertices without edges, so an agent whose start is its goal
+//! PBS, LNS2 and PIBT must return valid plans, and so must FOCBS with the last agent left
+//! without its goal. Blocked cells are vertices without edges, so an agent whose start is its goal
 //! may wait on a blocked cell. Instances stay at the scale of the property tests, so budgets stay small.
 
 #![no_main]
@@ -13,7 +14,8 @@
 use libfuzzer_sys::fuzz_target;
 use mapf_search::{
     Agent, Grid, Instance, Limits, Lns2Config, MapfResult, Objective, TaskAgent, TaskInstance,
-    Weight, cbs, cbs_ta, ecbs, epea, first_conflict, icts, lns2, mstar, pbs, pibt,
+    UaInstance, Weight, cbs, cbs_ta, ecbs, epea, first_conflict, focbs, icts, lns2, mstar, pbs,
+    pibt,
 };
 
 /// The most columns and rows a fuzzed grid has.
@@ -142,6 +144,38 @@ fn check_task_assignment(instance: &Instance<Grid>, objective: Objective, cbs: &
     }
 }
 
+/// Runs FOCBS with the last agent of `instance` left without its goal and checks the plan:
+/// assigned agents from start to goal, the unassigned one from its start, all conflict-free.
+fn check_unassigned(instance: &Instance<Grid>) {
+    let Some((idle, assigned)) = instance.agents().split_last() else {
+        return;
+    };
+    let ua = UaInstance::new(
+        instance.graph().clone(),
+        assigned.to_vec(),
+        vec![idle.start],
+    )
+    .expect("a valid instance stays valid");
+    let result = focbs(&ua, Limits::expansions(BUDGET));
+    let Some(solution) = result.solution() else {
+        return;
+    };
+
+    for (path, agent) in solution.assigned.paths.iter().zip(assigned) {
+        assert_eq!(path.first(), Some(&agent.start), "focbs: start");
+        assert_eq!(path.last(), Some(&agent.goal), "focbs: goal");
+    }
+
+    assert_eq!(
+        solution.unassigned[0].first(),
+        Some(&idle.start),
+        "focbs: idle start"
+    );
+    let mut all = solution.assigned.paths.clone();
+    all.extend(solution.unassigned.iter().cloned());
+    assert_eq!(first_conflict(&all), None, "focbs: conflict");
+}
+
 fuzz_target!(|data: &[u8]| {
     let Some((objective, instance)) = parse(data) else {
         return;
@@ -168,6 +202,7 @@ fuzz_target!(|data: &[u8]| {
     }
 
     check_task_assignment(&instance, objective, &optimal[0].1);
+    check_unassigned(&instance);
 
     let weight = Weight::new(3, 2);
     assert_valid(

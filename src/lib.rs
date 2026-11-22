@@ -17,6 +17,9 @@
 //! - [`cbs_ta()`]: CBS with task assignment over a [`TaskInstance`], whose agents each have
 //!   candidate goals; optimal over all assignments, with every [`CbsConfig`] improvement
 //!   ([`cbs_ta_with`]).
+//! - [`focbs()`]: FOCBS for a [`UaInstance`], where some agents have no goal and only must
+//!   get out of the way; CBS over the agents with goals and a min-cost flow oracle for the
+//!   others, optimal for the goal agents' sum of costs ([`focbs_with`], [`UaResult`]).
 //! - [`ecbs()`]: enhanced CBS, bounded-suboptimal within a [`Weight`] `w`, with focal search
 //!   at both levels.
 //! - [`icts()`]: increasing cost tree search with pairwise pruning, optimal.
@@ -35,15 +38,16 @@
 //!   Pareto-optimal plan when moves and waits cost vectors, shared or per agent, with an
 //!   opt-in feasibility check, conflict prioritization, bypass and disjoint splitting.
 //!
-//! Every solver but [`lns2()`] and [`pibt()`], which only seek a feasible plan, takes an
-//! [`Objective`]: sum of costs or makespan.
+//! Every solver but [`lns2()`] and [`pibt()`], which only seek a feasible plan, and
+//! [`focbs()`], which minimizes the sum of costs, takes an [`Objective`]: sum of costs or
+//! makespan.
 //! - [`space_time_astar`]: the single-agent low level under [`Constraint`]s, built on the
 //!   `heuristic-search` crate's A*.
 //! - [`first_conflict`] and [`conflicts`]: conflict detection on any set of paths.
 //! - [`parse_map`], [`parse_scenario`] and [`scenario_instance`]: Moving AI benchmarks.
 //!
-//! Every solver returns a [`MapfResult`]: an [`Outcome`] (with a [`Solution`] if solved)
-//! and high-level [`Stats`]. [`Budget`], [`Limits`] and [`Stats`] are re-exported from
+//! Every solver but [`focbs()`] (a [`UaResult`]) returns a [`MapfResult`]: an [`Outcome`]
+//! (with a [`Solution`] if solved) and high-level [`Stats`]. [`Budget`], [`Limits`] and [`Stats`] are re-exported from
 //! `heuristic-search`; they bound and count the high-level expansions. [`Weight`] is too.
 //!
 //! The crate is `no_std` and needs only `alloc`.
@@ -88,6 +92,7 @@ mod conflict_table;
 mod constraint;
 mod ecbs;
 mod epea;
+mod flow;
 mod focal;
 mod graph;
 mod icts;
@@ -104,7 +109,10 @@ mod pbs;
 mod pibt;
 mod solution;
 
-pub use cbs::{CbsConfig, CbsHeuristic, Splitting, cbs, cbs_ta, cbs_ta_with, cbs_with};
+pub use cbs::{
+    CbsConfig, CbsHeuristic, Splitting, UaOutcome, UaResult, UaSolution, cbs, cbs_ta, cbs_ta_with,
+    cbs_with, focbs, focbs_with,
+};
 pub use conflict::{Conflict, conflicts, first_conflict};
 pub use constraint::{Constraint, ConstraintSet};
 pub use ecbs::ecbs;
@@ -112,7 +120,7 @@ pub use epea::epea;
 pub use graph::{AdjacencyList, Graph, Grid, Vertex};
 pub use heuristic_search::{Budget, Limits, Stats, Weight};
 pub use icts::icts;
-pub use instance::{Agent, AgentId, Instance, InstanceError, TaskAgent, TaskInstance};
+pub use instance::{Agent, AgentId, Instance, InstanceError, TaskAgent, TaskInstance, UaInstance};
 pub use lns2::{Lns2Config, lns2};
 pub use low_level::space_time_astar;
 #[cfg(feature = "multi-objective")]

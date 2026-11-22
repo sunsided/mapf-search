@@ -61,6 +61,11 @@ mapf-search = "0.1"
 - CBS-TA, conflict-based search with task assignment: each agent has candidate goals, and
   the plan is optimal over all assignments, for sum of costs or makespan (`cbs_ta`,
   `cbs_ta_with`, `TaskInstance`)
+- FOCBS, flow-oracle CBS for agents without goals (idle robots that only have to get out of
+  the way): CBS over the agents with goals, a min-cost flow routes the idle ones, and the
+  flow's minimum cut tells CBS which reservations block them; optimal sum of costs for the
+  agents with goals, fewest moves for the idle ones given those paths (`focbs`,
+  `focbs_with`, `UaInstance`)
 - ECBS, bounded-suboptimal, focal search at both levels (`ecbs`)
 - PBS, priority-based search: fast, neither optimal nor complete (`pbs`)
 - PIBT, priority inheritance with backtracking: plans one time step for all agents at a
@@ -80,7 +85,8 @@ mapf-search = "0.1"
   conflict prioritization, bypass and disjoint splitting (`mo_cbs`, `mo_cbs_with`,
   `mo_cbs_per_agent`, `MoCbsConfig`; optional feature `multi-objective`)
 - Every single-objective solver except MAPF-LNS2 and PIBT, which only seek a feasible plan,
-  takes an `Objective`: sum of costs or makespan
+  and FOCBS, which minimizes the sum of costs, takes an `Objective`: sum of costs or
+  makespan
 - Shared parts: conflict detection, constraints, space-time A* low level, MDDs, Moving AI
   `.map`/`.scen` parsers
 
