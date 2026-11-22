@@ -357,6 +357,21 @@ mod tests {
         }
     }
 
+    /// Without agents, both objectives solve with the empty plan, as CBS does.
+    #[test]
+    fn no_agents_is_the_empty_plan() {
+        let tasks = TaskInstance::new(Grid::new(2, 1), Vec::new()).expect("valid");
+        let fixed = Instance::new(Grid::new(2, 1), Vec::new()).expect("valid");
+
+        for objective in [Objective::SumOfCosts, Objective::Makespan] {
+            let ta = cbs_ta(&tasks, objective, Limits::NONE);
+            let plain = crate::cbs::cbs(&fixed, objective, Limits::NONE);
+
+            assert_eq!(ta.outcome, Outcome::Solved(Solution::new(Vec::new())));
+            assert_eq!(ta.outcome, plain.outcome);
+        }
+    }
+
     /// More agents than distinct candidate goals is unsolvable without any search.
     #[test]
     fn too_few_goals_is_unsolvable() {

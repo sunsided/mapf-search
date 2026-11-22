@@ -186,7 +186,12 @@ fn best(costs: &Costs, objective: Objective) -> Option<(Assignment, Key)> {
 
 /// The assignment with the smallest largest entry, the cheapest sum among those, and its
 /// key: a binary search over the distinct entries for the smallest feasible threshold.
+/// Without agents, the empty assignment with key `(0, 0)`.
 fn min_bottleneck(costs: &Costs) -> Option<(Assignment, Key)> {
+    if costs.is_empty() {
+        return Some((Vec::new(), (0, 0)));
+    }
+
     let mut thresholds: Vec<u32> = costs.iter().flatten().flatten().copied().collect();
     thresholds.sort_unstable();
     thresholds.dedup();
@@ -408,6 +413,18 @@ mod tests {
         match objective {
             Objective::SumOfCosts => (total, total),
             Objective::Makespan => (largest, total),
+        }
+    }
+
+    /// Without agents, both objectives rank exactly the empty assignment.
+    #[test]
+    fn no_agents_have_the_empty_assignment() {
+        for objective in [Objective::SumOfCosts, Objective::Makespan] {
+            let mut ranked = Ranked::new(&[], objective);
+
+            assert_eq!(ranked.peek(), Some((0, 0)));
+            assert_eq!(ranked.next(), Some(Vec::new()));
+            assert_eq!(ranked.peek(), None);
         }
     }
 
