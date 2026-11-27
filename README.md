@@ -80,6 +80,10 @@ mapf-search = "0.1"
   obstacles) until none are left; seeded, neither optimal nor complete (`lns2`,
   `Lns2Config`)
 - ICTS with pairwise pruning, optimal (`icts`)
+- CBS with independence detection: agents that do not interact are solved as separate,
+  smaller problems, and conflicting groups merge and are solved again; optimal (`cbs_id`;
+  `cbs_id_par` solves the independent groups on several threads, optional feature
+  `parallel`)
 - M*, basic and recursive (rM*), each with or without operator decomposition (OD-M*,
   ODrM*), optimal, proves unsolvability (`mstar`, `mstar_with`, `MStarConfig`)
 - EPEA\*, enhanced partial expansion A\* in the joint space: generates only the children
@@ -117,7 +121,7 @@ assert_eq!(solution.sum_of_costs, 7);
 ```
 
 The crate is `no_std` and needs only `alloc`. The feature `multi-objective` adds MO-CBS
-over `multiobjective-search`.
+over `multiobjective-search`; the feature `parallel` adds `cbs_id_par` and needs `std`.
 
 ## MSRV
 

@@ -23,6 +23,10 @@
 //! - [`ecbs()`]: enhanced CBS, bounded-suboptimal within a [`Weight`] `w`, with focal search
 //!   at both levels.
 //! - [`icts()`]: increasing cost tree search with pairwise pruning, optimal.
+//! - [`cbs_id()`]: CBS with independence detection: groups of agents that do not interact
+//!   are solved as separate, smaller problems, and conflicting groups merge; optimal.
+//!   `cbs_id_par`, with the `parallel` feature, solves each round's groups on several
+//!   threads, with the same result.
 //! - [`mstar()`]: recursive M* with operator decomposition (subdimensional expansion),
 //!   optimal, and able to prove unsolvability; [`mstar_with`] and [`MStarConfig`] select
 //!   basic M*, recursive M* without operator decomposition, and OD-M*.
@@ -53,7 +57,7 @@
 //! and high-level [`Stats`]. [`Budget`], [`Limits`] and [`Stats`] are re-exported from
 //! `heuristic-search`; they bound and count the high-level expansions. [`Weight`] is too.
 //!
-//! The crate is `no_std` and needs only `alloc`.
+//! The crate is `no_std` and needs only `alloc`; the `parallel` feature needs `std`.
 //!
 //! ## Example
 //!
