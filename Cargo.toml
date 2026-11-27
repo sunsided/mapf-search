@@ -27,7 +27,7 @@ exclude = [
 
 [dependencies]
 # Low-level A*.
-heuristic-search = "0.2"
+heuristic-search = "0.3"
 # The conflict-avoidance low level's `Lexicographic` cost. Must be the same version that
 # heuristic-search uses, so that its `Cost` trait is the one A* runs on.
 search-core = "0.3"
