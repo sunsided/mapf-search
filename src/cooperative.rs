@@ -27,6 +27,11 @@
 //!     execute --> done
 //! ```
 //!
+//! The window is also how WHCA* deals with stale information: the plans of the other
+//! agents are trusted only through the window, and the agents sync again after
+//! [`WhcaConfig::step`] steps, before that trust runs out. Soft reservations (conflict
+//! counts) would not keep the plan collision-free.
+//!
 //! Within a round, every window plan avoids the reservations of the plans before it, so
 //! the window plans are conflict-free up to the window's end, and the executed steps lie
 //! inside it. Rounds follow each other in time, so the executed plan is conflict-free.

@@ -2,8 +2,8 @@
 
 Multi-agent pathfinding (MAPF): find one path per agent so that no two agents collide,
 minimizing a joint objective. This crate hosts the conflict-based family (CBS, CBS-TA,
-FOCBS, ECBS, MO-CBS), ICTS, PBS, PIBT and the turn-aware PIBT*_T, cooperative A* and
-WHCA*, M*, EPEA* and MAPF-LNS2 (over SIPPS).
+FOCBS, ECBS, MO-CBS), ICTS, PBS, PIBT and the turn-aware PIBT*_T, cooperative A*,
+WHCA* and decentralized prioritized planning (ADPP), M*, EPEA* and MAPF-LNS2 (over SIPPS).
 
 These algorithms share the problem model, path conflicts, joint objectives, constraints
 and reservations, and the single-agent low-level search. They do **not** share one search
@@ -48,7 +48,7 @@ engine with pluggable policies.
   is `sum(len_i - 1)`.
 - **Makespan**: `max_i T_i`.
 
-Every solver but LNS2, PIBT, PIBT*_T, CA* and WHCA*, which only seek a feasible plan, and FOCBS, which
+Every solver but LNS2, PIBT, PIBT*_T, CA*, WHCA* and ADPP, which only seek a feasible plan, and FOCBS, which
 minimizes the sum of costs, takes an `Objective` (`SumOfCosts` or `Makespan`). For CBS, both objectives
 use the same low level: each agent's path is the cheapest one under its constraints, so a CT node's makespan is
 a lower bound on the makespan of every solution below it, just as its SoC is for SoC.
@@ -501,6 +501,48 @@ terms.
   another's way make room: in the next round the blocked agent plans first.
 - `Stats::expanded` counts rounds (WHCA*) or agents planned (CA*); `generated` counts
   single-agent searches. `Unsolvable` only means an agent cannot reach its goal even alone.
+
+## ADPP (Čáp et al. 2012, 2015)
+
+`adpp(instance, config, budget)`: asynchronous decentralized prioritized planning, as a
+deterministic simulation of the protocol. There is no central solver; agent `i` has
+priority over every `j > i`, and knows other agents' plans only from their messages.
+
+- **Messages.** At the start each agent plans alone and broadcasts its plan to every agent
+  below it. Each message takes its own delay of `1..=config.max_delay` ticks, drawn from
+  `config.seed` (`random.rs`), so messages overtake each other. A broadcast carries the
+  version of the sender's plan; a recipient keeps the newest version per sender and drops
+  older ones that arrive late. `max_delay = 1` is the synchronized variant (SD-PP).
+- **Repair.** After a tick's deliveries, each recipient checks its plan against the newest
+  plans it knows of the agents above it (`first_conflict`, goal-stay included). If one
+  conflicts, it replans with the plain low level under their reservations held for good
+  (`reserve(.., None)`, as PBS and CA*) and broadcasts the new plan if it changed. An
+  agent without a path ends the run as `Exhausted`.
+- **Quiescence.** The run ends when no message is in flight. Each agent's last broadcast
+  has then reached every agent below it, so every agent holds the current plans above it
+  and its own plan avoids them: the plans are pairwise conflict-free (asserted in debug
+  builds). It terminates by induction on priority: agent 0 never replans, and once the
+  agents above `i` stop broadcasting, `i` replans at most once more.
+- **Result.** A fixed-priority plan like CA*'s, so it fails where CA* fails (an agent above
+  finishing on the way of one below). It need not be CA*'s plan: an agent replans only on
+  conflict, so it can keep a path that differs from the one CA* would pick.
+- `Stats::expanded` counts ticks that deliver messages, `generated` single-agent searches.
+
+## Stale information
+
+Agents that communicate rarely act on other agents' last known plans. A planner can treat
+those plans as hard reservations held for good (CA*, ADPP), as hard reservations held only
+through a bound, or as soft costs. Only the first two keep a plan collision-free: soft
+reservations (conflict counts as tie-breakers or penalties, as CBS's conflict avoidance
+table and ECBS's focal key use them) improve plans but guarantee nothing (Atzmon et al.,
+JAIR 2020; Li et al., AAAI 2021). A time-bounded reservation is sound only if every agent
+learns the others' new plans before it expires.
+
+`whca_star` is that scheme: `reserve(.., Some(window))` holds the last known plans only
+through the window, and the agents sync every `step <= window` steps, before it expires.
+It is also the periodic-communication ("digital rendezvous") reading of coordinating only
+at agreed times: `step` is the sync period. Keeping the previous plan when a round cannot
+be planned is not safe unless `window >= 2 * step`; WHCA* stops with `Exhausted` instead.
 
 ## PIBT (Okumura et al. 2019, 2022)
 

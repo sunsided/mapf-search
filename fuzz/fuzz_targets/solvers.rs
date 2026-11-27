@@ -4,7 +4,7 @@
 //! report the same cost whenever more than one of them solves the instance within its
 //! budget. CBS-TA runs on the same agents with every agent's goal as a candidate of every
 //! agent: its plan must end each agent at a distinct one, and cost no more than CBS's. ECBS,
-//! PBS, LNS2, PIBT, CA* and WHCA* must return valid plans, and so must FOCBS with the last agent left
+//! PBS, LNS2, PIBT, CA*, WHCA* and ADPP must return valid plans, and so must FOCBS with the last agent left
 //! without its goal, and PIBT*_T (headings from the input), whose every step waits, turns a
 //! quarter, or moves forward. Blocked cells are vertices without edges, so an agent whose start is its goal
 //! may wait on a blocked cell. Instances stay at the scale of the property tests, so budgets stay small.
@@ -15,9 +15,9 @@
 use libfuzzer_sys::fuzz_target;
 use mapf_search::OrientedGraph as _;
 use mapf_search::{
-    Agent, Grid, Heading, Instance, Limits, Lns2Config, MapfResult, Objective, TaskAgent,
-    TaskInstance, UaInstance, Weight, WhcaConfig, ca_star, cbs, cbs_ta, ecbs, epea, first_conflict,
-    focbs, icts, lns2, mstar, pbs, pibt, pibt_turns, whca_star,
+    AdppConfig, Agent, Grid, Heading, Instance, Limits, Lns2Config, MapfResult, Objective,
+    TaskAgent, TaskInstance, UaInstance, Weight, WhcaConfig, adpp, ca_star, cbs, cbs_ta, ecbs,
+    epea, first_conflict, focbs, icts, lns2, mstar, pbs, pibt, pibt_turns, whca_star,
 };
 
 /// The most columns and rows a fuzzed grid has.
@@ -262,4 +262,9 @@ fuzz_target!(|data: &[u8]| {
         &whca_star(&instance, config, budget()),
         "whca_star",
     );
+    let config = AdppConfig {
+        max_delay: 1 + u32::from(data[0] % 4),
+        seed: u64::from(data[0]),
+    };
+    assert_valid(&instance, &adpp(&instance, config, budget()), "adpp");
 });
