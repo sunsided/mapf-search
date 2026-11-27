@@ -128,8 +128,9 @@ pub fn adpp<G: Graph>(
     }
 }
 
-/// A broadcast on its way: the tick it arrives, its recipient, its sender and the version
-/// of the sender's plan it carries, in delivery order.
+/// A broadcast on its way: `(tick, to, from, version)`, the tick it arrives, its recipient,
+/// its sender and the version of the sender's plan it carries. Ordered as a tuple, a set of
+/// them yields each tick's messages together, grouped by recipient.
 type Message = (u64, AgentId, AgentId, usize);
 
 /// The state of one simulated ADPP run.
@@ -185,7 +186,8 @@ impl<G: Graph> Protocol<'_, G> {
         Outcome::Solved(self.solution())
     }
 
-    /// Delivers every message of `tick`; returns the recipients, in order.
+    /// Delivers every message of `tick`; returns the recipients, in order. Messages come
+    /// grouped by recipient ([`Message`]), so each recipient appears once.
     fn deliver(&mut self, tick: u64) -> Vec<AgentId> {
         let mut recipients = Vec::new();
         while let Some(&(when, to, from, version)) = self.in_flight.first() {
