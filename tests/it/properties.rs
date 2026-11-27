@@ -17,6 +17,12 @@ const SOLVABLE_BUDGET: u64 = 20_000;
 /// High-level expansions a solver may use on instances the oracle proves unsolvable.
 const UNSOLVABLE_BUDGET: u64 = 60;
 
+/// Expansions per group for the parallel-versus-sequential check of independence detection.
+/// The two runs must agree at any budget, `LimitReached` included; this one lets most
+/// instances finish without making the unsolvable ones slow.
+#[cfg(feature = "parallel")]
+const PAR_BUDGET: u64 = 1_000;
+
 /// A random grid of 2-3 by 2-3 cells (3 by 4 for two agents), about one cell in six
 /// blocked, with 2-3 agents on distinct free starts and distinct free goals.
 pub(crate) fn instance() -> impl Strategy<Value = (Grid, Vec<Agent>)> {
@@ -196,7 +202,7 @@ proptest! {
     ) {
         let instance = Instance::new(grid, agents).expect("valid by construction");
         let config = CbsConfig::improved(objective);
-        let limits = mapf_search::Limits::expansions(UNSOLVABLE_BUDGET);
+        let limits = mapf_search::Limits::expansions(PAR_BUDGET);
         prop_assert_eq!(
             mapf_search::cbs_id_par(&instance, config, limits, threads),
             mapf_search::cbs_id(&instance, config, limits)
