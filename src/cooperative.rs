@@ -221,6 +221,12 @@ fn reachable(agents: &[Agent], distances: &[Vec<Option<u32>>]) -> bool {
         .all(|(agent, distances)| distances[agent.start].is_some())
 }
 
+/// The planning order of round `round` over `count` agents: `round mod count` first, then
+/// the following ids, wrapping around.
+fn round_order(round: usize, count: usize) -> impl Iterator<Item = AgentId> {
+    (0..count).map(move |offset| (round + offset) % count)
+}
+
 /// The solution of conflict-free `paths`, each trimmed to its final arrival.
 fn solution(mut paths: Vec<Path>) -> Solution {
     paths.iter_mut().for_each(trim_trailing_waits);
@@ -286,7 +292,7 @@ impl<G: Graph> Windowed<'_, G> {
         let count = self.instance.agents().len();
         let mut windows: Vec<Path> = alloc::vec![Vec::new(); count];
         let mut constraints = ConstraintSet::new();
-        for agent in (0..count).map(|offset| (round + offset) % count) {
+        for agent in round_order(round, count) {
             let window = self.plan_window(agent, &constraints)?;
             reserve(&mut constraints, agent, &window, Some(self.config.window));
             windows[agent] = window;
@@ -415,6 +421,16 @@ mod tests {
         let solution = result.solution().expect("solved");
 
         assert_eq!(first_conflict(&solution.paths), None);
+    }
+
+    /// Round `r` plans agent `r mod n` first.
+    #[test]
+    fn rounds_rotate_the_first_agent() {
+        let orders: Vec<Vec<AgentId>> = (0..4)
+            .map(|round| round_order(round, 3).collect())
+            .collect();
+
+        assert_eq!(orders, [[0, 1, 2], [1, 2, 0], [2, 0, 1], [0, 1, 2]]);
     }
 
     /// A step of 0 is rejected.
