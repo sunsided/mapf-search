@@ -4,7 +4,7 @@
 //! report the same cost whenever more than one of them solves the instance within its
 //! budget. CBS-TA runs on the same agents with every agent's goal as a candidate of every
 //! agent: its plan must end each agent at a distinct one, and cost no more than CBS's. ECBS,
-//! PBS, LNS2 and PIBT must return valid plans, and so must FOCBS with the last agent left
+//! PBS, LNS2, PIBT, CA* and WHCA* must return valid plans, and so must FOCBS with the last agent left
 //! without its goal, and PIBT*_T (headings from the input), whose every step waits, turns a
 //! quarter, or moves forward. Blocked cells are vertices without edges, so an agent whose start is its goal
 //! may wait on a blocked cell. Instances stay at the scale of the property tests, so budgets stay small.
@@ -16,8 +16,8 @@ use libfuzzer_sys::fuzz_target;
 use mapf_search::OrientedGraph as _;
 use mapf_search::{
     Agent, Grid, Heading, Instance, Limits, Lns2Config, MapfResult, Objective, TaskAgent,
-    TaskInstance, UaInstance, Weight, cbs, cbs_ta, ecbs, epea, first_conflict, focbs, icts, lns2,
-    mstar, pbs, pibt, pibt_turns,
+    TaskInstance, UaInstance, Weight, WhcaConfig, ca_star, cbs, cbs_ta, ecbs, epea, first_conflict,
+    focbs, icts, lns2, mstar, pbs, pibt, pibt_turns, whca_star,
 };
 
 /// The most columns and rows a fuzzed grid has.
@@ -252,4 +252,14 @@ fuzz_target!(|data: &[u8]| {
     };
     assert_valid(&instance, &lns2(&instance, config, budget()), "lns2");
     assert_valid(&instance, &pibt(&instance, budget()), "pibt");
+    assert_valid(&instance, &ca_star(&instance, budget()), "ca_star");
+    let config = WhcaConfig {
+        window: 1 + u32::from(data[0] % 4),
+        step: 1,
+    };
+    assert_valid(
+        &instance,
+        &whca_star(&instance, config, budget()),
+        "whca_star",
+    );
 });
