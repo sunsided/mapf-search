@@ -28,11 +28,12 @@ use alloc::vec::Vec;
 use heuristic_search::{Budget, Stats};
 
 use crate::conflict::{Conflict, first_conflict};
-use crate::constraint::{Constraint, ConstraintSet};
-use crate::graph::{Graph, Vertex};
+use crate::constraint::ConstraintSet;
+use crate::graph::Graph;
 use crate::instance::{AgentId, Instance};
 use crate::low_level::{distance_tables, plan};
-use crate::path::{Objective, Path, Reservation, makespan, reservations, sum_of_costs};
+use crate::path::{Objective, Path, makespan, sum_of_costs};
+use crate::reservation::reserve;
 use crate::solution::{MapfResult, Outcome, Solution};
 
 /// Finds a conflict-free plan with priority-based search, aiming at a low `objective`
@@ -226,7 +227,7 @@ impl<G: Graph> Search<'_, G> {
     fn replan(&self, agent: AgentId, higher: &[&Path]) -> Option<Path> {
         let mut constraints = ConstraintSet::new();
         for path in higher {
-            avoid(&mut constraints, agent, path);
+            reserve(&mut constraints, agent, path, None);
         }
 
         plan(
@@ -243,27 +244,4 @@ fn below_or_equal(higher: &[BTreeSet<AgentId>], low: AgentId) -> Vec<AgentId> {
     (0..higher.len())
         .filter(|&agent| agent == low || higher[agent].contains(&low))
         .collect()
-}
-
-/// Adds to `constraints` (for `agent`) what keeps it out of the way of `path`: its vertex
-/// at every time, the reverse of each of its moves, and its last vertex from its arrival on.
-fn avoid(constraints: &mut ConstraintSet, agent: AgentId, path: &[Vertex]) {
-    for reservation in reservations(path) {
-        match reservation {
-            Reservation::Visit { vertex, time } => {
-                constraints.insert(&Constraint::Vertex {
-                    agent,
-                    vertex,
-                    time,
-                });
-            }
-            Reservation::Move { from, to, time } => constraints.insert(&Constraint::Edge {
-                agent,
-                from: to,
-                to: from,
-                time,
-            }),
-            Reservation::Park { vertex, time } => constraints.block_from(vertex, time),
-        }
-    }
 }

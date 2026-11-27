@@ -112,6 +112,7 @@ mod pbs;
 mod pibt;
 mod pibt_turns;
 mod random;
+mod reservation;
 mod solution;
 
 pub use cbs::{
