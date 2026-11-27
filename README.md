@@ -9,12 +9,13 @@
 [![unsafe forbidden](https://img.shields.io/badge/unsafe-forbidden-success.svg)](https://github.com/rust-secure-code/safety-dance/)
 
 Multi-agent pathfinding: CBS, CBS-TA, ECBS, ICTS, PBS, PIBT (also for agents that need time
-to turn), M\*, EPEA\*, MAPF-LNS2 and multi-objective MO-CBS on grids and general graphs.
+to turn), cooperative A\*, WHCA\* and decentralized prioritized planning (ADPP), M\*, EPEA\*, MAPF-LNS2 and multi-objective MO-CBS on
+grids and general graphs.
 
 Given a graph and a set of agents with start and goal vertices, the solvers find one path per
 agent so that no two agents ever share a vertex or swap along an edge. CBS, ICTS, M\* and
 EPEA\* minimize the sum of costs or the makespan, ECBS stays within a given factor of the optimum,
-and PBS, PIBT and MAPF-LNS2 trade optimality for speed. CBS-TA also picks the goals: each agent gets one of its
+and PBS, PIBT, cooperative A\*, WHCA\*, ADPP and MAPF-LNS2 trade optimality for speed. CBS-TA also picks the goals: each agent gets one of its
 candidate goals, optimally over all assignments. The optimal solvers are checked against a joint-space oracle by
 property tests, and M\* and EPEA\* also prove when an instance has no solution. The crate is
 `no_std` with `alloc`, uses the A\* of
@@ -75,6 +76,20 @@ mapf-search = "0.1"
 - PIBT\*_T, PIBT for robots that face a heading, move only forward and need time to turn in
   place, with cycle handling, swaps and a push escape trigger, on grids or any
   `OrientedGraph`; seeded, neither optimal nor complete (`pibt_turns`, `TurnResult`)
+- Cooperative A\* over a space-time reservation table: agents plan one after another,
+  each avoiding the paths before it; a fast baseline, neither optimal nor complete
+  (`ca_star`)
+- WHCA\*, windowed hierarchical cooperative A\*: rounds that reserve only the next few
+  steps, with a rotating first agent, and replan as the agents move; neither optimal nor
+  complete (`whca_star`, `WhcaConfig`)
+- ADPP, asynchronous decentralized prioritized planning, as a deterministic simulation:
+  each agent plans for itself and repairs conflicts with the plans of the agents above
+  it as they arrive after seeded message delays, with no central solver; neither optimal
+  nor complete (`adpp`, `AdppConfig`)
+- Rendezvous coordination for agents that can exchange plans only while connected in a
+  communication graph (radio range, line of sight): epochs of planned steps that end with
+  the team connected again, adapted from Hollinger and Singh's periodic connectivity;
+  neither optimal nor complete (`rendezvous`)
 - MAPF-LNS2, large neighborhood search repair: starts from a plan with collisions and
   replans a few agents at a time with SIPPS (safe interval path planning with soft
   obstacles) until none are left; seeded, neither optimal nor complete (`lns2`,
@@ -93,10 +108,11 @@ mapf-search = "0.1"
   from `multiobjective-search`, with an opt-in feasibility check (proves unsolvability),
   conflict prioritization, bypass and disjoint splitting (`mo_cbs`, `mo_cbs_with`,
   `mo_cbs_per_agent`, `MoCbsConfig`; optional feature `multi-objective`)
-- Every single-objective solver except MAPF-LNS2, PIBT and PIBT\*_T, which only seek a
-  feasible plan, and FOCBS, which minimizes the sum of costs, takes an `Objective`: sum of
+- Every single-objective solver except MAPF-LNS2, PIBT, PIBT\*_T, cooperative A\*, WHCA\*
+  ADPP and rendezvous coordination, which only seek a feasible plan, and FOCBS, which minimizes the sum of costs, takes an `Objective`: sum of
   costs or makespan
-- Shared parts: conflict detection, constraints, space-time A* low level, MDDs, Moving AI
+- Shared parts: conflict detection, constraints and reservation tables, space-time A* low
+  level, MDDs, Moving AI
   `.map`/`.scen` parsers
 
 ## Usage

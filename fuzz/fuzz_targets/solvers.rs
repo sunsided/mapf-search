@@ -4,7 +4,9 @@
 //! report the same cost whenever more than one of them solves the instance within its
 //! budget. CBS-TA runs on the same agents with every agent's goal as a candidate of every
 //! agent: its plan must end each agent at a distinct one, and cost no more than CBS's. ECBS,
-//! PBS, LNS2 and PIBT must return valid plans, and so must FOCBS with the last agent left
+//! PBS, LNS2, PIBT, CA*, WHCA* and ADPP must return valid plans, and so must rendezvous
+//! planning with links between orthogonally adjacent cells (through walls), whose agents must
+//! also be linked at every rendezvous, and so must FOCBS with the last agent left
 //! without its goal, and PIBT*_T (headings from the input), whose every step waits, turns a
 //! quarter, or moves forward. Blocked cells are vertices without edges, so an agent whose start is its goal
 //! may wait on a blocked cell. Instances stay at the scale of the property tests, so budgets stay small.
@@ -15,9 +17,10 @@
 use libfuzzer_sys::fuzz_target;
 use mapf_search::OrientedGraph as _;
 use mapf_search::{
-    Agent, CbsConfig, Grid, Heading, Instance, Limits, Lns2Config, MapfResult, Objective,
-    TaskAgent, TaskInstance, UaInstance, Weight, cbs, cbs_id, cbs_ta, ecbs, epea, first_conflict,
-    focbs, icts, lns2, mstar, pbs, pibt, pibt_turns,
+    AdppConfig, Agent, CbsConfig, Grid, Heading, Instance, Limits, Lns2Config, MapfResult,
+    Objective, TaskAgent, TaskInstance, UaInstance, Weight, WhcaConfig, adpp, ca_star, cbs, cbs_id,
+    cbs_ta, ecbs, epea, first_conflict, focbs, icts, lns2, mstar, pbs, pibt, pibt_turns,
+    position_at, rendezvous, whca_star,
 };
 
 /// The most columns and rows a fuzzed grid has.
@@ -256,4 +259,59 @@ fuzz_target!(|data: &[u8]| {
     };
     assert_valid(&instance, &lns2(&instance, config, budget()), "lns2");
     assert_valid(&instance, &pibt(&instance, budget()), "pibt");
+    assert_valid(&instance, &ca_star(&instance, budget()), "ca_star");
+    let config = WhcaConfig {
+        window: 1 + u32::from(data[0] % 4),
+        step: 1,
+    };
+    assert_valid(
+        &instance,
+        &whca_star(&instance, config, budget()),
+        "whca_star",
+    );
+    let config = AdppConfig {
+        max_delay: 1 + u32::from(data[0] % 4),
+        seed: u64::from(data[0]),
+    };
+    assert_valid(&instance, &adpp(&instance, config, budget()), "adpp");
+    check_rendezvous(&instance, 1 + u32::from(data[0] % 3));
 });
+
+/// Runs rendezvous planning every `interval` steps with links between orthogonally
+/// adjacent cells, walls ignored, and checks its plan: valid, and the agents linked at every
+/// multiple of `interval`.
+fn check_rendezvous(instance: &Instance<Grid>, interval: u32) {
+    let grid = instance.graph();
+    let comm = Grid::new(grid.width(), grid.height());
+    let result = rendezvous(instance, &comm, interval, Limits::expansions(BUDGET));
+    assert_valid(instance, &result, "rendezvous");
+    let Some(solution) = result.solution() else {
+        return;
+    };
+
+    let end = solution.paths.iter().map(Vec::len).max().unwrap_or(1);
+    for time in (0..=u32::try_from(end).expect("short")).step_by(interval as usize) {
+        let cells: Vec<_> = solution
+            .paths
+            .iter()
+            .map(|path| grid.cell(position_at(path, time)))
+            .collect();
+        let mut linked = vec![false; cells.len()];
+        let mut stack = vec![0];
+        linked[0] = true;
+        while let Some(agent) = stack.pop() {
+            let (x, y) = cells[agent];
+            for (other, &(u, v)) in cells.iter().enumerate() {
+                if !linked[other] && x.abs_diff(u) + y.abs_diff(v) == 1 {
+                    linked[other] = true;
+                    stack.push(other);
+                }
+            }
+        }
+
+        assert!(
+            linked.iter().all(|&l| l),
+            "rendezvous: disconnected at {time}"
+        );
+    }
+}

@@ -240,6 +240,32 @@ proptest! {
         check(&grid, &agents, Solver::Pibt(objective))?;
     }
 
+    /// CA* plans are valid and no cheaper than the optimum; CA* may give up.
+    #[test]
+    fn ca_star_plans_are_valid((grid, agents) in instance(), objective in objective()) {
+        check(&grid, &agents, Solver::CaStar(objective))?;
+    }
+
+    /// Rendezvous plans (every pair linked) are valid and no cheaper than the optimum; the
+    /// planner may stop at its budget.
+    #[test]
+    fn rendezvous_plans_are_valid((grid, agents) in instance(), objective in objective()) {
+        check(&grid, &agents, Solver::Rendezvous(objective))?;
+    }
+
+    /// ADPP plans are valid and no cheaper than the optimum; ADPP may give up.
+    #[test]
+    fn adpp_plans_are_valid((grid, agents) in instance(), objective in objective()) {
+        check(&grid, &agents, Solver::Adpp(objective))?;
+    }
+
+    /// WHCA* plans are valid and no cheaper than the optimum; WHCA* may give up or stop at
+    /// its budget.
+    #[test]
+    fn whca_star_plans_are_valid((grid, agents) in instance(), objective in objective()) {
+        check(&grid, &agents, Solver::Whca(objective))?;
+    }
+
     /// PBS plans are valid and no cheaper than the optimum, for both objectives; PBS may
     /// give up.
     #[test]

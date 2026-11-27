@@ -39,13 +39,26 @@
 //! - [`pibt_turns()`]: PIBT*_T, PIBT for agents that face a heading, move only forward and
 //!   need time to turn, on any [`OrientedGraph`] such as a [`Grid`] ([`TurnResult`]).
 //! - [`pbs()`]: priority-based search, fast but neither optimal nor complete.
+//! - [`ca_star()`]: cooperative A* over a space-time reservation table: agents plan one
+//!   after another, each avoiding the paths before it; a fast baseline, neither optimal
+//!   nor complete.
+//! - [`whca_star()`]: windowed hierarchical cooperative A*: rounds that reserve only the
+//!   next [`WhcaConfig::window`] steps, with a rotating first agent, and replan as the
+//!   agents move; neither optimal nor complete.
+//! - [`adpp()`]: asynchronous decentralized prioritized planning, simulated: each agent
+//!   plans for itself and repairs conflicts with the plans of the agents above it as
+//!   those arrive after seeded delays, with no central solver; neither optimal nor
+//!   complete.
+//! - [`rendezvous()`]: coordination at physical rendezvous for agents that can exchange
+//!   plans only while connected in a communication graph: epochs of planned steps that end
+//!   with the team connected again; neither optimal nor complete.
 //! - `mo_cbs`, `mo_cbs_with` and `mo_cbs_per_agent`, with the `multi-objective` feature:
 //!   multi-objective CBS (MO-CBS and MO-CBS-t, over BOA* or NAMOA*dr), every
 //!   Pareto-optimal plan when moves and waits cost vectors, shared or per agent, with an
 //!   opt-in feasibility check, conflict prioritization, bypass and disjoint splitting.
 //!
-//! Every solver but [`lns2()`], [`pibt()`] and [`pibt_turns()`], which only seek a feasible
-//! plan, and [`focbs()`], which minimizes the sum of costs, takes an [`Objective`]: sum of
+//! Every solver but [`lns2()`], [`pibt()`], [`pibt_turns()`], [`ca_star()`],
+//! [`whca_star()`], [`adpp()`] and [`rendezvous()`], which only seek a feasible plan, and [`focbs()`], which minimizes the sum of costs, takes an [`Objective`]: sum of
 //! costs or makespan.
 //! - [`space_time_astar`]: the single-agent low level under [`Constraint`]s, built on the
 //!   `heuristic-search` crate's A*.
@@ -94,11 +107,13 @@ extern crate std;
 #[doc = include_str!("../README.md")]
 mod readme_doctests {}
 
+mod adpp;
 mod assignment;
 mod cbs;
 mod conflict;
 mod conflict_table;
 mod constraint;
+mod cooperative;
 mod ecbs;
 mod epea;
 mod flow;
@@ -118,14 +133,18 @@ mod pbs;
 mod pibt;
 mod pibt_turns;
 mod random;
+mod rendezvous;
+mod reservation;
 mod solution;
 
+pub use adpp::{AdppConfig, adpp};
 pub use cbs::{
     CbsConfig, CbsHeuristic, Splitting, UaOutcome, UaResult, UaSolution, cbs, cbs_ta, cbs_ta_with,
     cbs_with, focbs, focbs_with,
 };
 pub use conflict::{Conflict, conflicts, first_conflict};
 pub use constraint::{Constraint, ConstraintSet};
+pub use cooperative::{WhcaConfig, ca_star, whca_star};
 pub use ecbs::ecbs;
 pub use epea::epea;
 pub use graph::{AdjacencyList, Graph, Grid, Heading, OrientedGraph, Vertex};
@@ -151,4 +170,5 @@ pub use path::{Objective, Path, Time, makespan, path_cost, position_at, sum_of_c
 pub use pbs::pbs;
 pub use pibt::pibt;
 pub use pibt_turns::{TurnResult, pibt_turns};
+pub use rendezvous::rendezvous;
 pub use solution::{MapfResult, Outcome, Solution};

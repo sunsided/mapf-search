@@ -2,8 +2,8 @@
 
 Multi-agent pathfinding (MAPF): find one path per agent so that no two agents collide,
 minimizing a joint objective. This crate hosts the conflict-based family (CBS, CBS-TA,
-FOCBS, ECBS, MO-CBS), ICTS, PBS, PIBT and the turn-aware PIBT*_T, M*, EPEA* and MAPF-LNS2
-(over SIPPS).
+FOCBS, ECBS, MO-CBS), ICTS, PBS, PIBT and the turn-aware PIBT*_T, cooperative A*,
+WHCA*, decentralized prioritized planning (ADPP) and rendezvous coordination, M*, EPEA* and MAPF-LNS2 (over SIPPS).
 
 These algorithms share the problem model, path conflicts, joint objectives, constraints
 and reservations, and the single-agent low-level search. They do **not** share one search
@@ -48,7 +48,8 @@ engine with pluggable policies.
   is `sum(len_i - 1)`.
 - **Makespan**: `max_i T_i`.
 
-Every solver but LNS2, PIBT and PIBT*_T, which only seek a feasible plan, and FOCBS, which
+Every solver but LNS2, PIBT, PIBT*_T, CA*, WHCA*, ADPP and rendezvous coordination, which
+only seek a feasible plan, and FOCBS, which
 minimizes the sum of costs, takes an `Objective` (`SumOfCosts` or `Makespan`). For CBS, both objectives
 use the same low level: each agent's path is the cheapest one under its constraints, so a CT node's makespan is
 a lower bound on the makespan of every solution below it, just as its SoC is for SoC.
@@ -451,8 +452,8 @@ constraint-tree nodes that a pop empties.
 `pbs(instance, objective, budget)`: depth-first search over partial priority orders. A node stores the
 transitive closure of its order (`higher[a]`, every agent above `a`) and one path per
 agent, the cheapest one that avoids the paths of all agents above it. Those paths become
-constraints: their vertex at each time, the reverse of each move, and `block_from` at their
-goal from their arrival on.
+constraints (`reservation::reserve`, shared with CA* and WHCA*): their vertex at each time,
+the reverse of each move, and `block_from` at their goal from their arrival on.
 
 The earliest conflict `(a, b)` gives two children, `a` above `b` and `b` above `a`, unless
 the order already says otherwise. A child replans the new lower agent. Then it replans, in
@@ -461,6 +462,121 @@ it. In a transitive closure an agent above another has strictly fewer agents abo
 sorting by `|higher|` is a topological order. A failed replan drops the child. The cheaper
 child is explored first. PBS is neither optimal nor complete; `Unsolvable` only means an
 agent cannot reach its goal even alone.
+
+## CA* and WHCA* (Silver 2005)
+
+Both plan agents one after another over a reservation table. The table is a
+`ConstraintSet`: `reservation::reserve(constraints, agent, path, until)` adds a path's
+vertex at each time, the reverse of each move, and its last vertex from its arrival on.
+With `until = None` the last vertex is blocked for good (`block_from`), as PBS needs. With
+`until = Some(t)` nothing after `t` is reserved and the last vertex is held only through
+`t`: a window plan's last position is not a park. The low level is the plain space-time A*
+(`low_level::plan`) with the agent's distance table as heuristic. That is what Silver's
+*hierarchical* CA* computes with reverse resumable A*, so CA* here is HCA* in the paper's
+terms.
+
+- **`ca_star(instance, budget)`** plans agents in index order, for good. A finished agent
+  holds its goal forever, so a later agent that must pass it fails: `Exhausted`. The
+  budget is asked before each agent.
+- **`whca_star(instance, config, budget)`** runs rounds. In round `r`, agents plan from
+  where they stand, in the order `r, r + 1, ... (mod n)`, each under the reservations of
+  the window plans before it, through `config.window`. A window plan is the first
+  `window + 1` positions of the agent's cheapest full path under those constraints: past
+  the window nothing is reserved, so the rest follows the distance table. Then every agent
+  executes `config.step` steps (`1 <= step <= window`). The run ends at the first round
+  that starts with every agent at its goal; paths are trimmed of trailing waits.
+- **Why the executed plan is conflict-free.** Within a round, each window plan avoids the
+  reservations of the plans before it, through the window's end, including swaps on moves
+  that end inside it. Conflicts are symmetric, so the window plans are pairwise
+  conflict-free on `[0, window]`, and the executed steps lie inside that. Rounds follow
+  each other in time. An agent's own goal is safe to stop at only after the latest
+  reservation on it (`ConstraintSet::earliest_finish`), so padding a short plan with its
+  goal stays conflict-free within the window. Debug builds assert `first_conflict` is
+  `None`.
+- **Failure modes.** A round fails (`Exhausted`) when an agent finds no path around the
+  window plans before it, for example when they take its vertex and every neighbour in
+  the next step. Agents can also oscillate, so the budget (rounds) is what stops WHCA* on
+  an instance it cannot finish. Rotating the first agent is what lets an agent sitting on
+  another's way make room: in the next round the blocked agent plans first.
+- `Stats::expanded` counts rounds (WHCA*) or agents planned (CA*); `generated` counts
+  single-agent searches. `Unsolvable` only means an agent cannot reach its goal even alone.
+
+## ADPP (Čáp et al. 2012, 2015)
+
+`adpp(instance, config, budget)`: asynchronous decentralized prioritized planning, as a
+deterministic simulation of the protocol. There is no central solver; agent `i` has
+priority over every `j > i`, and knows other agents' plans only from their messages.
+
+- **Messages.** At the start each agent plans alone and broadcasts its plan to every agent
+  below it. Each message takes its own delay of `1..=config.max_delay` ticks, drawn from
+  `config.seed` (`random.rs`), so messages overtake each other. A broadcast carries the
+  version of the sender's plan; a recipient keeps the newest version per sender and drops
+  older ones that arrive late. `max_delay = 1` is the synchronized variant (SD-PP).
+- **Repair.** After a tick's deliveries, each recipient checks its plan against the newest
+  plans it knows of the agents above it (`first_conflict`, goal-stay included). If one
+  conflicts, it replans with the plain low level under their reservations held for good
+  (`reserve(.., None)`, as PBS and CA*) and broadcasts the new plan if it changed. An
+  agent without a path ends the run as `Exhausted`.
+- **Quiescence.** The run ends when no message is in flight. Each agent's last broadcast
+  has then reached every agent below it, so every agent holds the current plans above it
+  and its own plan avoids them: the plans are pairwise conflict-free (asserted in debug
+  builds). It terminates by induction on priority: agent 0 never replans, and once the
+  agents above `i` stop broadcasting, `i` replans at most once more.
+- **Result.** A fixed-priority plan like CA*'s, so it fails where CA* fails (an agent above
+  finishing on the way of one below). It need not be CA*'s plan: an agent replans only on
+  conflict, so it can keep a path that differs from the one CA* would pick.
+- `Stats::expanded` counts ticks that deliver messages, `generated` single-agent searches.
+
+## Stale information
+
+Agents that communicate rarely act on other agents' last known plans. A planner can treat
+those plans as hard reservations held for good (CA*, ADPP), as hard reservations held only
+through a bound, or as soft costs. Only the first two keep a plan collision-free: soft
+reservations (conflict counts as tie-breakers or penalties, as CBS's conflict avoidance
+table and ECBS's focal key use them) improve plans but guarantee nothing (Atzmon et al.,
+JAIR 2020; Li et al., AAAI 2021). A time-bounded reservation is sound only if every agent
+learns the others' new plans before it expires.
+
+`whca_star` is that scheme: `reserve(.., Some(window))` holds the last known plans only
+through the window, and the agents sync every `step <= window` steps, before it expires.
+It is also the periodic-communication ("digital rendezvous") reading of coordinating only
+at agreed times: `step` is the sync period. The physical reading is `rendezvous`. Keeping the previous plan when a round cannot
+be planned is not safe unless `window >= 2 * step`; WHCA* stops with `Exhausted` instead.
+
+## Rendezvous (adapted from Hollinger and Singh 2010)
+
+`rendezvous(instance, comm, interval, budget)`: agents can exchange plans only while they
+are connected in `comm`, a communication graph on the same vertices (radio range, line of
+sight). A configuration is connected if the agents' vertices, joined by `comm` edges in
+either direction, form one component, so agents relay for each other (union-find,
+`connected`). The literature means this physical reading by "rendezvous"; the digital one,
+syncing only every `k` steps, is WHCA* (see Stale information). The background and sources
+are in `docs/research/rendezvous.md`.
+
+- **Epochs.** The team must be connected every `interval` steps. At a rendezvous it agrees
+  on a joint plan of `interval` steps, then executes it without communication.
+- **Passes.** A pass plans every agent once, breadth-first along the team's current links
+  from a first agent (`link_order`), so each agent is linked to one planned before it.
+  An agent takes the reachable end (a time-layered search over `interval` steps under
+  `reserve(.., Some(interval))` of the plans before it) that is closest to its goal among
+  those linked to the ends planned before it. It ignores agents not planned yet: they plan
+  around it, which is what lets two agents swap places. A pass fails if an agent finds no
+  such end.
+- **Choosing the epoch's plan.** Passes from agent `e mod n` in epoch `e`, then from each
+  following agent; the first valid pass that lowers the summed distance to the goals wins.
+  Otherwise everyone stays put.
+- **Why it is safe.** Each agent of a pass avoids the plans before it, so the joint plan is
+  conflict-free through the epoch; each ends linked to the agents before it, so the team
+  ends connected. Staying put has both properties. By induction every rendezvous finds the
+  team connected, and the executed plan is conflict-free (both asserted in debug builds).
+  This argument and the pass are this crate's adaptation: the paper plans by coordinate
+  ascent from staying put with the whole team's connectivity checked per move, which
+  stalls a column of agents (the leader cannot move ahead alone), and it lets robots share
+  cells.
+- **Limits.** Not complete. Every epoch must lower the summed distance, so an agent never
+  steps off its goal to let another pass. A start or goal configuration that is not
+  connected gives `Exhausted` at once: the agents could never coordinate, or never all stand
+  at their goals at a rendezvous. `Stats::expanded` counts epochs, `generated` searches.
 
 ## PIBT (Okumura et al. 2019, 2022)
 

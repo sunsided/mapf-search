@@ -162,6 +162,10 @@ proptest! {
             Solver::Pbs(objective),
             Solver::Lns2(objective),
             Solver::Pibt(objective),
+            Solver::CaStar(objective),
+            Solver::Whca(objective),
+            Solver::Adpp(objective),
+            Solver::Rendezvous(objective),
         ];
 
         agree(&grid, &agents, objective, &optimal, &others)?;

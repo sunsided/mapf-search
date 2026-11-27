@@ -5,9 +5,10 @@ use std::hint::black_box;
 
 use criterion::Criterion;
 use mapf_search::{
-    Agent, CbsConfig, Grid, Instance, Limits, Lns2Config, MStarConfig, MapfResult, Objective,
-    TaskAgent, TaskInstance, UaInstance, Weight, cbs_id, cbs_ta, cbs_with, ecbs, epea, focbs, icts,
-    lns2, mstar_with, pbs, pibt, pibt_turns,
+    AdppConfig, Agent, CbsConfig, Grid, Instance, Limits, Lns2Config, MStarConfig, MapfResult,
+    Objective, TaskAgent, TaskInstance, UaInstance, Weight, WhcaConfig, adpp, ca_star, cbs_id,
+    cbs_ta, cbs_with, ecbs, epea, focbs, icts, lns2, mstar_with, pbs, pibt, pibt_turns, rendezvous,
+    whca_star,
 };
 
 /// The benchmark instance: eight agents crossing an 8x8 map with a few walls.
@@ -88,6 +89,38 @@ fn bench_turns(c: &mut Criterion, instance: &Instance<Grid>) {
     c.bench_function("pibt_turns", |b| b.iter(|| black_box(solve())));
 }
 
+/// Benchmarks CA* and ADPP on `instance`, WHCA* (default window) on `instance` and
+/// `crowded`, and rendezvous planning on a column of four agents crossing an 8x8 grid,
+/// linked only to orthogonal neighbours.
+fn bench_cooperative(c: &mut Criterion, instance: &Instance<Grid>, crowded: &Instance<Grid>) {
+    let budget = || Limits::expansions(100_000);
+    let grid = Grid::new(8, 8);
+    let column = (0..4)
+        .map(|y| Agent {
+            start: grid.vertex(0, y),
+            goal: grid.vertex(7, y + 4),
+        })
+        .collect();
+    let column = Instance::new(grid.clone(), column).expect("valid");
+    let solvers: [(&str, &dyn Fn() -> MapfResult); 5] = [
+        ("ca_star", &|| ca_star(instance, budget())),
+        ("adpp", &|| adpp(instance, AdppConfig::default(), budget())),
+        ("whca_star", &|| {
+            whca_star(instance, WhcaConfig::default(), budget())
+        }),
+        ("whca_star crowded", &|| {
+            whca_star(crowded, WhcaConfig::default(), budget())
+        }),
+        ("rendezvous column", &|| {
+            rendezvous(&column, &grid, 4, budget())
+        }),
+    ];
+    for (name, solve) in solvers {
+        assert!(solve().solution().is_some(), "{name} solves the benchmark");
+        c.bench_function(name, |b| b.iter(|| black_box(solve())));
+    }
+}
+
 /// Benchmarks FOCBS on `idle`, an instance with agents without goals.
 fn bench_focbs(c: &mut Criterion, idle: &UaInstance<Grid>) {
     let solve = || focbs(idle, Limits::expansions(100_000));
@@ -165,6 +198,7 @@ fn main() {
 
     bench_turns(&mut c, &instance);
     bench_independence(&mut c, &instance);
+    bench_cooperative(&mut c, &instance, &crowded);
 
     c.final_summary();
 }
