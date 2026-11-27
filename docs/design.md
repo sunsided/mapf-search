@@ -2,8 +2,8 @@
 
 Multi-agent pathfinding (MAPF): find one path per agent so that no two agents collide,
 minimizing a joint objective. This crate hosts the conflict-based family (CBS, CBS-TA,
-FOCBS, ECBS, MO-CBS), ICTS, PBS, PIBT and the turn-aware PIBT*_T, M*, EPEA* and MAPF-LNS2
-(over SIPPS).
+FOCBS, ECBS, MO-CBS), ICTS, PBS, PIBT and the turn-aware PIBT*_T, cooperative A* and
+WHCA*, M*, EPEA* and MAPF-LNS2 (over SIPPS).
 
 These algorithms share the problem model, path conflicts, joint objectives, constraints
 and reservations, and the single-agent low-level search. They do **not** share one search
@@ -48,7 +48,7 @@ engine with pluggable policies.
   is `sum(len_i - 1)`.
 - **Makespan**: `max_i T_i`.
 
-Every solver but LNS2, PIBT and PIBT*_T, which only seek a feasible plan, and FOCBS, which
+Every solver but LNS2, PIBT, PIBT*_T, CA* and WHCA*, which only seek a feasible plan, and FOCBS, which
 minimizes the sum of costs, takes an `Objective` (`SumOfCosts` or `Makespan`). For CBS, both objectives
 use the same low level: each agent's path is the cheapest one under its constraints, so a CT node's makespan is
 a lower bound on the makespan of every solution below it, just as its SoC is for SoC.
@@ -453,8 +453,8 @@ focal value (`push(item, f, value, g, key)` with `f <= value`), as the local lis
 `pbs(instance, objective, budget)`: depth-first search over partial priority orders. A node stores the
 transitive closure of its order (`higher[a]`, every agent above `a`) and one path per
 agent, the cheapest one that avoids the paths of all agents above it. Those paths become
-constraints: their vertex at each time, the reverse of each move, and `block_from` at their
-goal from their arrival on.
+constraints (`reservation::reserve`, shared with CA* and WHCA*): their vertex at each time,
+the reverse of each move, and `block_from` at their goal from their arrival on.
 
 The earliest conflict `(a, b)` gives two children, `a` above `b` and `b` above `a`, unless
 the order already says otherwise. A child replans the new lower agent. Then it replans, in
@@ -463,6 +463,44 @@ it. In a transitive closure an agent above another has strictly fewer agents abo
 sorting by `|higher|` is a topological order. A failed replan drops the child. The cheaper
 child is explored first. PBS is neither optimal nor complete; `Unsolvable` only means an
 agent cannot reach its goal even alone.
+
+## CA* and WHCA* (Silver 2005)
+
+Both plan agents one after another over a reservation table. The table is a
+`ConstraintSet`: `reservation::reserve(constraints, agent, path, until)` adds a path's
+vertex at each time, the reverse of each move, and its last vertex from its arrival on.
+With `until = None` the last vertex is blocked for good (`block_from`), as PBS needs. With
+`until = Some(t)` nothing after `t` is reserved and the last vertex is held only through
+`t`: a window plan's last position is not a park. The low level is the plain space-time A*
+(`low_level::plan`) with the agent's distance table as heuristic. That is what Silver's
+*hierarchical* CA* computes with reverse resumable A*, so CA* here is HCA* in the paper's
+terms.
+
+- **`ca_star(instance, budget)`** plans agents in index order, for good. A finished agent
+  holds its goal forever, so a later agent that must pass it fails: `Exhausted`. The
+  budget is asked before each agent.
+- **`whca_star(instance, config, budget)`** runs rounds. In round `r`, agents plan from
+  where they stand, in the order `r, r + 1, ... (mod n)`, each under the reservations of
+  the window plans before it, through `config.window`. A window plan is the first
+  `window + 1` positions of the agent's cheapest full path under those constraints: past
+  the window nothing is reserved, so the rest follows the distance table. Then every agent
+  executes `config.step` steps (`1 <= step <= window`). The run ends at the first round
+  that starts with every agent at its goal; paths are trimmed of trailing waits.
+- **Why the executed plan is conflict-free.** Within a round, each window plan avoids the
+  reservations of the plans before it, through the window's end, including swaps on moves
+  that end inside it. Conflicts are symmetric, so the window plans are pairwise
+  conflict-free on `[0, window]`, and the executed steps lie inside that. Rounds follow
+  each other in time. An agent's own goal is safe to stop at only after the latest
+  reservation on it (`ConstraintSet::earliest_finish`), so padding a short plan with its
+  goal stays conflict-free within the window. Debug builds assert `first_conflict` is
+  `None`.
+- **Failure modes.** A round fails (`Exhausted`) when an agent finds no path around the
+  window plans before it, for example when they take its vertex and every neighbour in
+  the next step. Agents can also oscillate, so the budget (rounds) is what stops WHCA* on
+  an instance it cannot finish. Rotating the first agent is what lets an agent sitting on
+  another's way make room: in the next round the blocked agent plans first.
+- `Stats::expanded` counts rounds (WHCA*) or agents planned (CA*); `generated` counts
+  single-agent searches. `Unsolvable` only means an agent cannot reach its goal even alone.
 
 ## PIBT (Okumura et al. 2019, 2022)
 

@@ -6,8 +6,8 @@ use std::hint::black_box;
 use criterion::Criterion;
 use mapf_search::{
     Agent, CbsConfig, Grid, Instance, Limits, Lns2Config, MStarConfig, MapfResult, Objective,
-    TaskAgent, TaskInstance, UaInstance, Weight, cbs_ta, cbs_with, ecbs, epea, focbs, icts, lns2,
-    mstar_with, pbs, pibt, pibt_turns,
+    TaskAgent, TaskInstance, UaInstance, Weight, WhcaConfig, ca_star, cbs_ta, cbs_with, ecbs, epea,
+    focbs, icts, lns2, mstar_with, pbs, pibt, pibt_turns, whca_star,
 };
 
 /// The benchmark instance: eight agents crossing an 8x8 map with a few walls.
@@ -71,6 +71,31 @@ fn bench_turns(c: &mut Criterion, instance: &Instance<Grid>) {
         "pibt_turns solves the benchmark"
     );
     c.bench_function("pibt_turns", |b| b.iter(|| black_box(solve())));
+}
+
+/// Benchmarks CA* on `instance` and WHCA* (default window) on `instance` and `crowded`.
+fn bench_cooperative(c: &mut Criterion, instance: &Instance<Grid>, crowded: &Instance<Grid>) {
+    let budget = || Limits::expansions(100_000);
+    let solvers: [(&str, &dyn Fn() -> MapfResult); 3] = [
+        ("ca_star", &|| ca_star(instance, budget())),
+        ("whca_star", &|| {
+            whca_star(instance, WhcaConfig::default(), budget())
+        }),
+        ("whca_star crowded", &|| {
+            whca_star(crowded, WhcaConfig::default(), budget())
+        }),
+    ];
+    for (name, solve) in solvers {
+        assert!(solve().solution().is_some(), "{name} solves the benchmark");
+        c.bench_function(name, |b| b.iter(|| black_box(solve())));
+    }
+}
+
+/// Benchmarks FOCBS on `idle`, an instance with agents without goals.
+fn bench_focbs(c: &mut Criterion, idle: &UaInstance<Grid>) {
+    let solve = || focbs(idle, Limits::expansions(100_000));
+    assert!(solve().solution().is_some(), "focbs solves the benchmark");
+    c.bench_function("focbs two idle", |b| b.iter(|| black_box(solve())));
 }
 
 /// The benchmark instance with its last two agents left without goals.
@@ -139,15 +164,10 @@ fn main() {
         c.bench_function(name, |b| b.iter(|| black_box(solve())));
     }
 
-    assert!(
-        focbs(&idle, budget()).solution().is_some(),
-        "focbs solves the benchmark"
-    );
-    c.bench_function("focbs two idle", |b| {
-        b.iter(|| black_box(focbs(&idle, budget())));
-    });
+    bench_focbs(&mut c, &idle);
 
     bench_turns(&mut c, &instance);
+    bench_cooperative(&mut c, &instance, &crowded);
 
     c.final_summary();
 }
