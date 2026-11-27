@@ -3,7 +3,7 @@
 Multi-agent pathfinding (MAPF): find one path per agent so that no two agents collide,
 minimizing a joint objective. This crate hosts the conflict-based family (CBS, CBS-TA,
 FOCBS, ECBS, MO-CBS), ICTS, PBS, PIBT and the turn-aware PIBT*_T, cooperative A*,
-WHCA* and decentralized prioritized planning (ADPP), M*, EPEA* and MAPF-LNS2 (over SIPPS).
+WHCA*, decentralized prioritized planning (ADPP) and rendezvous coordination, M*, EPEA* and MAPF-LNS2 (over SIPPS).
 
 These algorithms share the problem model, path conflicts, joint objectives, constraints
 and reservations, and the single-agent low-level search. They do **not** share one search
@@ -48,7 +48,8 @@ engine with pluggable policies.
   is `sum(len_i - 1)`.
 - **Makespan**: `max_i T_i`.
 
-Every solver but LNS2, PIBT, PIBT*_T, CA*, WHCA* and ADPP, which only seek a feasible plan, and FOCBS, which
+Every solver but LNS2, PIBT, PIBT*_T, CA*, WHCA*, ADPP and rendezvous coordination, which
+only seek a feasible plan, and FOCBS, which
 minimizes the sum of costs, takes an `Objective` (`SumOfCosts` or `Makespan`). For CBS, both objectives
 use the same low level: each agent's path is the cheapest one under its constraints, so a CT node's makespan is
 a lower bound on the makespan of every solution below it, just as its SoC is for SoC.
@@ -541,8 +542,43 @@ learns the others' new plans before it expires.
 `whca_star` is that scheme: `reserve(.., Some(window))` holds the last known plans only
 through the window, and the agents sync every `step <= window` steps, before it expires.
 It is also the periodic-communication ("digital rendezvous") reading of coordinating only
-at agreed times: `step` is the sync period. Keeping the previous plan when a round cannot
+at agreed times: `step` is the sync period. The physical reading is `rendezvous`. Keeping the previous plan when a round cannot
 be planned is not safe unless `window >= 2 * step`; WHCA* stops with `Exhausted` instead.
+
+## Rendezvous (adapted from Hollinger and Singh 2010)
+
+`rendezvous(instance, comm, interval, budget)`: agents can exchange plans only while they
+are connected in `comm`, a communication graph on the same vertices (radio range, line of
+sight). A configuration is connected if the agents' vertices, joined by `comm` edges in
+either direction, form one component, so agents relay for each other (union-find,
+`connected`). The literature means this physical reading by "rendezvous"; the digital one,
+syncing only every `k` steps, is WHCA* (see Stale information). The background and sources
+are in `docs/research/rendezvous.md`.
+
+- **Epochs.** The team must be connected every `interval` steps. At a rendezvous it agrees
+  on a joint plan of `interval` steps, then executes it without communication.
+- **Passes.** A pass plans every agent once, breadth-first along the team's current links
+  from a first agent (`link_order`), so each agent is linked to one planned before it.
+  An agent takes the reachable end (a time-layered search over `interval` steps under
+  `reserve(.., Some(interval))` of the plans before it) that is closest to its goal among
+  those linked to the ends planned before it. It ignores agents not planned yet: they plan
+  around it, which is what lets two agents swap places. A pass fails if an agent finds no
+  such end.
+- **Choosing the epoch's plan.** Passes from agent `e mod n` in epoch `e`, then from each
+  following agent; the first valid pass that lowers the summed distance to the goals wins.
+  Otherwise everyone stays put.
+- **Why it is safe.** Each agent of a pass avoids the plans before it, so the joint plan is
+  conflict-free through the epoch; each ends linked to the agents before it, so the team
+  ends connected. Staying put has both properties. By induction every rendezvous finds the
+  team connected, and the executed plan is conflict-free (both asserted in debug builds).
+  This argument and the pass are this crate's adaptation: the paper plans by coordinate
+  ascent from staying put with the whole team's connectivity checked per move, which
+  stalls a column of agents (the leader cannot move ahead alone), and it lets robots share
+  cells.
+- **Limits.** Not complete. Every epoch must lower the summed distance, so an agent never
+  steps off its goal to let another pass. A start or goal configuration that is not
+  connected gives `Exhausted` at once: the agents could never coordinate, or never all stand
+  at their goals at a rendezvous. `Stats::expanded` counts epochs, `generated` searches.
 
 ## PIBT (Okumura et al. 2019, 2022)
 

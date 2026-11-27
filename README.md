@@ -86,6 +86,10 @@ mapf-search = "0.1"
   each agent plans for itself and repairs conflicts with the plans of the agents above
   it as they arrive after seeded message delays, with no central solver; neither optimal
   nor complete (`adpp`, `AdppConfig`)
+- Rendezvous coordination for agents that can exchange plans only while connected in a
+  communication graph (radio range, line of sight): epochs of planned steps that end with
+  the team connected again, adapted from Hollinger and Singh's periodic connectivity;
+  neither optimal nor complete (`rendezvous`)
 - MAPF-LNS2, large neighborhood search repair: starts from a plan with collisions and
   replans a few agents at a time with SIPPS (safe interval path planning with soft
   obstacles) until none are left; seeded, neither optimal nor complete (`lns2`,
@@ -101,7 +105,7 @@ mapf-search = "0.1"
   conflict prioritization, bypass and disjoint splitting (`mo_cbs`, `mo_cbs_with`,
   `mo_cbs_per_agent`, `MoCbsConfig`; optional feature `multi-objective`)
 - Every single-objective solver except MAPF-LNS2, PIBT, PIBT\*_T, cooperative A\*, WHCA\*
-  and ADPP, which only seek a feasible plan, and FOCBS, which minimizes the sum of costs, takes an `Objective`: sum of
+  ADPP and rendezvous coordination, which only seek a feasible plan, and FOCBS, which minimizes the sum of costs, takes an `Objective`: sum of
   costs or makespan
 - Shared parts: conflict detection, constraints and reservation tables, space-time A* low
   level, MDDs, Moving AI

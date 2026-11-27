@@ -222,6 +222,13 @@ proptest! {
         check(&grid, &agents, Solver::CaStar(objective))?;
     }
 
+    /// Rendezvous plans (every pair linked) are valid and no cheaper than the optimum; the
+    /// planner may stop at its budget.
+    #[test]
+    fn rendezvous_plans_are_valid((grid, agents) in instance(), objective in objective()) {
+        check(&grid, &agents, Solver::Rendezvous(objective))?;
+    }
+
     /// ADPP plans are valid and no cheaper than the optimum; ADPP may give up.
     #[test]
     fn adpp_plans_are_valid((grid, agents) in instance(), objective in objective()) {
