@@ -27,12 +27,12 @@ exclude = [
 
 [dependencies]
 # Low-level A*.
-heuristic-search = "0.2"
+heuristic-search = "0.4"
 # The conflict-avoidance low level's `Lexicographic` cost. Must be the same version that
 # heuristic-search uses, so that its `Cost` trait is the one A* runs on.
-search-core = "0.3"
+search-core = "0.3.2"
 # Multi-objective low level of MO-CBS (NAMOA*dr, BOA*).
-multiobjective-search = { version = "0.1", optional = true }
+multiobjective-search = { version = "0.1.2", optional = true }
 
 [features]
 ## Multi-objective CBS (`mo_cbs`, `mo_cbs_with`, `mo_cbs_per_agent`) over NAMOA*dr-st

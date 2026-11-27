@@ -410,11 +410,10 @@ benchmark's eight-agent instance with the last two agents idle it takes about 0.
 `ecbs(instance, objective, weight, budget)` returns a plan whose objective value is at
 most `w` times the optimum (see Objectives for makespan). `w` is heuristic-search's rational `Weight` (re-exported), compared in integers.
 
-- **Focal list.** A local `FocalList` (`focal.rs`). Each item has an admissible `f` that
-  orders the open list, and a *value* (at least `f`) that decides focal membership: value
-  at most `floor(w * f_min)`. The focal sublist is ordered by a free secondary key. Items
-  can be removed by handle, and the sublist is resynchronized lazily when `f_min` moves
-  either way.
+- **Focal lists.** Both levels use heuristic-search's `FocalList` over dense ids. Each
+  item has an admissible `f` that orders the open list and defines `f_min`, and a focal
+  *value* that decides membership: value at most `w * f_min`, compared in integers. The
+  focal sublist is ordered by a free key, then `f`, then `g` and push order.
 - **Low level.** Focal search over `(vertex, time)`. Here `f` is both order and value, and
   the focal key is the accumulated number of conflicts with the other agents' current
   paths (vertex conflicts, swaps, agents parked at their goals), then `f`, then larger `g`.
@@ -435,19 +434,18 @@ most `w` times the optimum (see Objectives for makespan). `w` is heuristic-searc
   earlier ones' paths.
 - `w = 1` is optimal; the property tests check this against the oracle.
 
-**Focal lists.** The low level uses heuristic-search's `FocalList` (`push(item, f, g,
-key)` over dense arena ids, `pop`, `min_f`, `contains`): `f` orders it and decides focal
-membership, the time is `g`, the conflict count is the key, and its tie-breaks (smaller `f`,
-then larger `g`, then first in) are what the local list did. Re-keying an open state with
-fewer conflicts is a second `push`; `min_f` before the pop is the lower bound.
+**Focal lists.** The low level pushes with `push(item, f, g, key)` over dense arena ids:
+`f` orders the list and decides focal membership, the time is `g`, the conflict count is
+the key. Re-keying an open state with fewer conflicts is a second `push`; `min_f` before
+the pop is the lower bound.
 
-The high level keeps the local `FocalList` (`focal.rs`). The upstream list admits an item
-to focal by its `f`, but ECBS's high level needs two values: the lower bound orders the
-list and is the `f_min` the guarantee is measured against, while the node's *cost*, which
-may be larger, must be within `w * f_min`. With the bound as `f`, upstream would admit
-nodes whose cost exceeds `w * f_min`, which breaks the guarantee; with the cost as `f`,
-`f_min` is no longer a lower bound on the optimum. Upstream would fit with a separate
-focal value (`push(item, f, value, g, key)` with `f <= value`), as the local list has.
+The high level needs two values: the lower bound orders the list and is the `f_min` the
+guarantee is measured against, while the node's *cost*, which may be larger, must be
+within `w * f_min`. With the bound as `f`, membership by `f` would admit nodes whose cost
+exceeds `w * f_min`, which breaks the guarantee; with the cost as `f`, `f_min` is no
+longer a lower bound on the optimum. So it pushes with `push_with_value(id, bound, 0,
+cost, key)`: the bound as `f`, the cost as value, and node ids into an arena of
+constraint-tree nodes that a pop empties.
 
 ## PBS (Ma et al. 2019)
 
