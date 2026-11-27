@@ -6,7 +6,7 @@ use heuristic_search::Limits;
 use mapf_search::{
     AdjacencyList, AdppConfig, Agent, CbsConfig, Graph, Grid, Instance, Lns2Config, MStarConfig,
     MapfResult, Objective, Outcome, Weight, WhcaConfig, adpp, ca_star, cbs_with, ecbs, epea, icts,
-    lns2, mstar_with, pbs, pibt, whca_star,
+    lns2, mstar_with, pbs, pibt, rendezvous, whca_star,
 };
 
 use crate::oracle::{assert_valid_plan, optimal_cost};
@@ -41,6 +41,10 @@ pub enum Solver {
     /// ADPP with its default configuration; no guarantee, incomplete. It optimizes nothing;
     /// the objective is the one its plans are checked against.
     Adpp(Objective),
+    /// Rendezvous every 3 steps with every pair of vertices linked; no guarantee,
+    /// incomplete. It optimizes nothing; the objective is the one its plans are checked
+    /// against.
+    Rendezvous(Objective),
 }
 
 impl Solver {
@@ -53,7 +57,7 @@ impl Solver {
     }
 
     /// Every solver in a representative configuration, for `objective`.
-    pub fn all_for(objective: Objective) -> [Self; 14] {
+    pub fn all_for(objective: Objective) -> [Self; 15] {
         [
             Self::Cbs(CbsConfig::plain(objective)),
             Self::Cbs(CbsConfig::improved(objective)),
@@ -69,6 +73,7 @@ impl Solver {
             Self::CaStar(objective),
             Self::Whca(objective),
             Self::Adpp(objective),
+            Self::Rendezvous(objective),
         ]
     }
 
@@ -99,6 +104,14 @@ impl Solver {
                 Limits::expansions(budget.min(500)),
             ),
             Self::Adpp(_) => adpp(instance, AdppConfig::default(), limits),
+            // Like PIBT, rendezvous planning that has not finished a tiny instance in 500
+            // epochs waits forever.
+            Self::Rendezvous(_) => rendezvous(
+                instance,
+                &complete(instance.graph().vertex_count()),
+                3,
+                Limits::expansions(budget.min(500)),
+            ),
         }
     }
 
@@ -115,7 +128,8 @@ impl Solver {
             | Self::Pibt(objective)
             | Self::CaStar(objective)
             | Self::Whca(objective)
-            | Self::Adpp(objective) => objective,
+            | Self::Adpp(objective)
+            | Self::Rendezvous(objective) => objective,
         }
     }
 
@@ -130,7 +144,8 @@ impl Solver {
             | Self::Pibt(_)
             | Self::CaStar(_)
             | Self::Whca(_)
-            | Self::Adpp(_) => None,
+            | Self::Adpp(_)
+            | Self::Rendezvous(_) => None,
         }
     }
 
@@ -145,8 +160,18 @@ impl Solver {
                 | Self::CaStar(_)
                 | Self::Whca(_)
                 | Self::Adpp(_)
+                | Self::Rendezvous(_)
         )
     }
+}
+
+/// The communication graph that links every pair of the `vertices`.
+fn complete(vertices: usize) -> AdjacencyList {
+    let edges: Vec<(usize, usize)> = (0..vertices)
+        .flat_map(|a| (0..vertices).filter(move |&b| b != a).map(move |b| (a, b)))
+        .collect();
+
+    AdjacencyList::directed(vertices, &edges)
 }
 
 /// Checks that `cost` is within `solver`'s guarantee over `optimum`.
@@ -193,10 +218,12 @@ fn check_solvers<G: Graph + Clone>(graph: &G, agents: &[Agent], solvers: Vec<Sol
 ///     3
 /// ```
 ///
-/// Every solver but PIBT, CA* and ADPP: the graph has no cycle, so PIBT pushes the agent at
-/// the goal to a dead end and back forever (`pibt::tests::can_livelock_off_a_cycle`), and
-/// the fixed-priority planners CA* and ADPP let agent 0 hold its goal for good
-/// (`cooperative::tests`, `adpp::tests`).
+/// Every solver but PIBT, CA*, ADPP and rendezvous planning: the graph has no cycle, so
+/// PIBT pushes the agent at the goal to a dead end and back forever
+/// (`pibt::tests::can_livelock_off_a_cycle`), the fixed-priority planners CA* and ADPP let
+/// agent 0 hold its goal for good (`cooperative::tests`, `adpp::tests`), and rendezvous
+/// planning takes only epochs that bring the team closer to its goals, which stepping off
+/// one does not.
 #[test]
 fn every_solver_steps_off_a_goal() {
     let graph = AdjacencyList::undirected(4, &[(0, 1), (1, 2), (1, 3)]);
@@ -206,7 +233,7 @@ fn every_solver_steps_off_a_goal() {
         .filter(|solver| {
             !matches!(
                 solver,
-                Solver::Pibt(_) | Solver::CaStar(_) | Solver::Adpp(_)
+                Solver::Pibt(_) | Solver::CaStar(_) | Solver::Adpp(_) | Solver::Rendezvous(_)
             )
         })
         .collect();
@@ -224,14 +251,20 @@ fn every_solver_steps_off_a_goal() {
 /// ```
 ///
 /// Every solver but CA* and ADPP, which give agent 0 priority and let it hold its goal for
-/// good.
+/// good, and rendezvous planning, which takes only epochs that bring the team closer to its
+/// goals: agent 0 would have to step off its goal and back.
 #[test]
 fn every_solver_passes_a_finished_goal() {
     let graph = AdjacencyList::undirected(5, &[(0, 1), (1, 2), (2, 3), (1, 4)]);
     let agents = [Agent { start: 4, goal: 1 }, Agent { start: 0, goal: 3 }];
     let solvers = Solver::all()
         .into_iter()
-        .filter(|solver| !matches!(solver, Solver::CaStar(_) | Solver::Adpp(_)))
+        .filter(|solver| {
+            !matches!(
+                solver,
+                Solver::CaStar(_) | Solver::Adpp(_) | Solver::Rendezvous(_)
+            )
+        })
         .collect();
 
     assert_eq!(
