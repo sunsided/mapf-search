@@ -5,7 +5,8 @@
 //! no state is reopened, and `f_min` stays a valid lower bound on the agent's optimal cost.
 //! The horizon is the one of the A* low level ([`crate::space_time_astar`]). The open list
 //! is `heuristic-search`'s [`FocalList`]: `f` orders it and decides focal membership,
-//! which is what a single-agent search needs.
+//! which is what a single-agent search needs. The high level uses the same list with a
+//! separate focal value.
 //!
 //! Finishing is a step of its own: from the goal, once the agent may stay there for good,
 //! a free step leads to a *finished* copy of the state, the only goal state. It costs the

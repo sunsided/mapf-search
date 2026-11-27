@@ -19,13 +19,12 @@ mod low_level;
 
 use alloc::vec::Vec;
 
-use heuristic_search::{Budget, Stats, Weight};
+use heuristic_search::{Budget, FocalList, Stats, Weight};
 
 use self::low_level::{FocalPath, Problem, focal_plan};
 use crate::conflict::{Conflict, conflicts};
 use crate::conflict_table::ConflictTable;
 use crate::constraint::{Constraint, ConstraintSet};
-use crate::focal::FocalList;
 use crate::graph::Graph;
 use crate::instance::{AgentId, Instance};
 use crate::low_level::distance_tables;
@@ -80,6 +79,7 @@ pub fn ecbs<G: Graph>(
         weight,
         distances: distance_tables(instance.graph(), instance.agents()),
         open: FocalList::new(weight),
+        nodes: Vec::new(),
         stats: Stats::default(),
     };
     let outcome = search.run(&mut budget);
@@ -132,9 +132,11 @@ struct Search<'a, G> {
     weight: Weight,
     /// Distances to each agent's goal, indexed by agent.
     distances: Vec<Vec<Option<u32>>>,
-    /// The open nodes: lower bound as `f`, objective value as value; focal key:
-    /// conflicting pairs, then the objective value.
-    open: FocalList<(usize, u32), Node>,
+    /// The open nodes, as indices into [`Search::nodes`]: lower bound as `f`, objective
+    /// value as focal value; focal key: conflicting pairs, then the objective value.
+    open: FocalList<u32, (usize, u32)>,
+    /// Every generated node, indexed by its id in [`Search::open`]; `None` once popped.
+    nodes: Vec<Option<Node>>,
     /// Counters reported in [`MapfResult::stats`].
     stats: Stats,
 }
@@ -147,7 +149,8 @@ impl<G: Graph> Search<'_, G> {
         };
 
         self.push(root);
-        while let Some((node, _)) = self.open.pop() {
+        while let Some(id) = self.open.pop() {
+            let node = self.nodes[id].take().expect("open nodes are stored");
             let Some(conflict) = node.conflict else {
                 return Outcome::Solved(Solution::new(node.paths));
             };
@@ -239,7 +242,9 @@ impl<G: Graph> Search<'_, G> {
         );
 
         self.stats.generated += 1;
+        let id = self.nodes.len();
         self.open
-            .push(lower_bound, cost, (node.conflicting_pairs, cost), node);
+            .push_with_value(id, lower_bound, 0, cost, (node.conflicting_pairs, cost));
+        self.nodes.push(Some(node));
     }
 }
