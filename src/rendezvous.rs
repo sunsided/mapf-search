@@ -33,6 +33,11 @@
 //! would, stalls a column of agents for good. The run ends at the first rendezvous with
 //! every agent at its goal.
 //!
+//! The returned paths are trimmed of their trailing waits. Under goal-stay semantics that
+//! changes no agent's position at any time ([`position_at`](crate::position_at)), so the
+//! team is still connected at every multiple of `interval`. A single agent is connected by
+//! itself.
+//!
 //! The safety argument is this crate's adaptation, not the paper's, and there is no
 //! completeness result. Every epoch must bring the team closer to its goals, so an agent
 //! never steps off its goal to let another pass, and the greedy passes can leave the team
