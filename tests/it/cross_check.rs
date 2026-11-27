@@ -163,6 +163,7 @@ proptest! {
             Solver::Pibt(objective),
             Solver::CaStar(objective),
             Solver::Whca(objective),
+            Solver::Adpp(objective),
         ];
 
         agree(&grid, &agents, objective, &optimal, &others)?;

@@ -41,13 +41,17 @@
 //! - [`whca_star()`]: windowed hierarchical cooperative A*: rounds that reserve only the
 //!   next [`WhcaConfig::window`] steps, with a rotating first agent, and replan as the
 //!   agents move; neither optimal nor complete.
+//! - [`adpp()`]: asynchronous decentralized prioritized planning, simulated: each agent
+//!   plans for itself and repairs conflicts with the plans of the agents above it as
+//!   those arrive after seeded delays, with no central solver; neither optimal nor
+//!   complete.
 //! - `mo_cbs`, `mo_cbs_with` and `mo_cbs_per_agent`, with the `multi-objective` feature:
 //!   multi-objective CBS (MO-CBS and MO-CBS-t, over BOA* or NAMOA*dr), every
 //!   Pareto-optimal plan when moves and waits cost vectors, shared or per agent, with an
 //!   opt-in feasibility check, conflict prioritization, bypass and disjoint splitting.
 //!
-//! Every solver but [`lns2()`], [`pibt()`], [`pibt_turns()`], [`ca_star()`] and
-//! [`whca_star()`], which only seek a feasible plan, and [`focbs()`], which minimizes the sum of costs, takes an [`Objective`]: sum of
+//! Every solver but [`lns2()`], [`pibt()`], [`pibt_turns()`], [`ca_star()`],
+//! [`whca_star()`] and [`adpp()`], which only seek a feasible plan, and [`focbs()`], which minimizes the sum of costs, takes an [`Objective`]: sum of
 //! costs or makespan.
 //! - [`space_time_astar`]: the single-agent low level under [`Constraint`]s, built on the
 //!   `heuristic-search` crate's A*.
@@ -94,6 +98,7 @@ extern crate alloc;
 #[doc = include_str!("../README.md")]
 mod readme_doctests {}
 
+mod adpp;
 mod assignment;
 mod cbs;
 mod conflict;
@@ -122,6 +127,7 @@ mod random;
 mod reservation;
 mod solution;
 
+pub use adpp::{AdppConfig, adpp};
 pub use cbs::{
     CbsConfig, CbsHeuristic, Splitting, UaOutcome, UaResult, UaSolution, cbs, cbs_ta, cbs_ta_with,
     cbs_with, focbs, focbs_with,

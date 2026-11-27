@@ -222,6 +222,12 @@ proptest! {
         check(&grid, &agents, Solver::CaStar(objective))?;
     }
 
+    /// ADPP plans are valid and no cheaper than the optimum; ADPP may give up.
+    #[test]
+    fn adpp_plans_are_valid((grid, agents) in instance(), objective in objective()) {
+        check(&grid, &agents, Solver::Adpp(objective))?;
+    }
+
     /// WHCA* plans are valid and no cheaper than the optimum; WHCA* may give up or stop at
     /// its budget.
     #[test]
