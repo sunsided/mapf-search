@@ -82,6 +82,8 @@
 #![forbid(unsafe_code)]
 
 extern crate alloc;
+#[cfg(feature = "parallel")]
+extern crate std;
 
 /// Doctests for the code examples in README.md (not part of the API).
 #[cfg(doctest)]
@@ -98,6 +100,7 @@ mod epea;
 mod flow;
 mod graph;
 mod icts;
+mod independence;
 mod instance;
 mod lns2;
 mod low_level;
@@ -124,6 +127,9 @@ pub use epea::epea;
 pub use graph::{AdjacencyList, Graph, Grid, Heading, OrientedGraph, Vertex};
 pub use heuristic_search::{Budget, Limits, Stats, Weight};
 pub use icts::icts;
+pub use independence::cbs_id;
+#[cfg(feature = "parallel")]
+pub use independence::cbs_id_par;
 pub use instance::{Agent, AgentId, Instance, InstanceError, TaskAgent, TaskInstance, UaInstance};
 pub use lns2::{Lns2Config, lns2};
 pub use low_level::space_time_astar;

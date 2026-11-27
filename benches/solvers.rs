@@ -6,8 +6,8 @@ use std::hint::black_box;
 use criterion::Criterion;
 use mapf_search::{
     Agent, CbsConfig, Grid, Instance, Limits, Lns2Config, MStarConfig, MapfResult, Objective,
-    TaskAgent, TaskInstance, UaInstance, Weight, cbs_ta, cbs_with, ecbs, epea, focbs, icts, lns2,
-    mstar_with, pbs, pibt, pibt_turns,
+    TaskAgent, TaskInstance, UaInstance, Weight, cbs_id, cbs_ta, cbs_with, ecbs, epea, focbs, icts,
+    lns2, mstar_with, pbs, pibt, pibt_turns,
 };
 
 /// The benchmark instance: eight agents crossing an 8x8 map with a few walls.
@@ -62,6 +62,21 @@ fn crowded() -> Instance<Grid> {
     Instance::new(Grid::new(8, 8), agents).expect("valid")
 }
 
+/// Benchmarks CBS with independence detection on `instance`, and with the `parallel`
+/// feature its parallel form on four threads.
+fn bench_independence(c: &mut Criterion, instance: &Instance<Grid>) {
+    let config = CbsConfig::improved(Objective::SumOfCosts);
+    let limits = Limits::expansions(100_000);
+    let solve = || cbs_id(instance, config, limits);
+    assert!(solve().solution().is_some(), "cbs_id solves the benchmark");
+    c.bench_function("cbs_id", |b| b.iter(|| black_box(solve())));
+
+    #[cfg(feature = "parallel")]
+    c.bench_function("cbs_id_par 4 threads", |b| {
+        b.iter(|| black_box(mapf_search::cbs_id_par(instance, config, limits, 4)));
+    });
+}
+
 /// Benchmarks PIBT*_T on `instance`, every agent facing east at the start.
 fn bench_turns(c: &mut Criterion, instance: &Instance<Grid>) {
     let east = vec![Grid::EAST; instance.agents().len()];
@@ -71,6 +86,13 @@ fn bench_turns(c: &mut Criterion, instance: &Instance<Grid>) {
         "pibt_turns solves the benchmark"
     );
     c.bench_function("pibt_turns", |b| b.iter(|| black_box(solve())));
+}
+
+/// Benchmarks FOCBS on `idle`, an instance with agents without goals.
+fn bench_focbs(c: &mut Criterion, idle: &UaInstance<Grid>) {
+    let solve = || focbs(idle, Limits::expansions(100_000));
+    assert!(solve().solution().is_some(), "focbs solves the benchmark");
+    c.bench_function("focbs two idle", |b| b.iter(|| black_box(solve())));
 }
 
 /// The benchmark instance with its last two agents left without goals.
@@ -139,15 +161,10 @@ fn main() {
         c.bench_function(name, |b| b.iter(|| black_box(solve())));
     }
 
-    assert!(
-        focbs(&idle, budget()).solution().is_some(),
-        "focbs solves the benchmark"
-    );
-    c.bench_function("focbs two idle", |b| {
-        b.iter(|| black_box(focbs(&idle, budget())));
-    });
+    bench_focbs(&mut c, &idle);
 
     bench_turns(&mut c, &instance);
+    bench_independence(&mut c, &instance);
 
     c.final_summary();
 }

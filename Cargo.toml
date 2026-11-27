@@ -38,6 +38,9 @@ multiobjective-search = { version = "0.1", optional = true }
 ## Multi-objective CBS (`mo_cbs`, `mo_cbs_with`, `mo_cbs_per_agent`) over NAMOA*dr-st
 ## or BOA*-st from `multiobjective-search`, with its optional improvements.
 multi-objective = ["dep:multiobjective-search"]
+## `cbs_id_par`: independence detection that solves independent agent groups on several
+## threads, with heuristic-search's `solve_batch`. Needs `std`.
+parallel = ["heuristic-search/parallel"]
 
 [dev-dependencies]
 criterion = { version = "0.8", default-features = false }

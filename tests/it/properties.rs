@@ -179,6 +179,30 @@ proptest! {
         check(&grid, &agents, Solver::Cbs(config))?;
     }
 
+    /// CBS with independence detection agrees with the oracle, for both objectives.
+    #[test]
+    fn cbs_id_matches_joint_search((grid, agents) in instance(), objective in objective()) {
+        check(&grid, &agents, Solver::CbsId(CbsConfig::improved(objective)))?;
+    }
+
+    /// The parallel run of CBS with independence detection gives the same result as the
+    /// sequential one, statistics included.
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn cbs_id_par_matches_sequential(
+        (grid, agents) in instance(),
+        objective in objective(),
+        threads in 1_usize..=4,
+    ) {
+        let instance = Instance::new(grid, agents).expect("valid by construction");
+        let config = CbsConfig::improved(objective);
+        let limits = mapf_search::Limits::expansions(UNSOLVABLE_BUDGET);
+        prop_assert_eq!(
+            mapf_search::cbs_id_par(&instance, config, limits, threads),
+            mapf_search::cbs_id(&instance, config, limits)
+        );
+    }
+
     /// ICTS agrees with the oracle, for both objectives.
     #[test]
     fn icts_matches_joint_search((grid, agents) in instance(), objective in objective()) {

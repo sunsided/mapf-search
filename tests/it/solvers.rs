@@ -5,7 +5,7 @@
 use heuristic_search::Limits;
 use mapf_search::{
     AdjacencyList, Agent, CbsConfig, Graph, Grid, Instance, Lns2Config, MStarConfig, MapfResult,
-    Objective, Outcome, Weight, cbs_with, ecbs, epea, icts, lns2, mstar_with, pbs, pibt,
+    Objective, Outcome, Weight, cbs_id, cbs_with, ecbs, epea, icts, lns2, mstar_with, pbs, pibt,
 };
 
 use crate::oracle::{assert_valid_plan, optimal_cost};
@@ -15,6 +15,8 @@ use crate::oracle::{assert_valid_plan, optimal_cost};
 pub enum Solver {
     /// CBS with a configuration; optimal for its objective.
     Cbs(CbsConfig),
+    /// CBS with independence detection and a configuration; optimal for its objective.
+    CbsId(CbsConfig),
     /// ECBS with a suboptimality factor; bounded-suboptimal for its objective.
     Ecbs(Objective, Weight),
     /// PBS; no guarantee, incomplete.
@@ -43,10 +45,11 @@ impl Solver {
     }
 
     /// Every solver in a representative configuration, for `objective`.
-    pub fn all_for(objective: Objective) -> [Self; 11] {
+    pub fn all_for(objective: Objective) -> [Self; 12] {
         [
             Self::Cbs(CbsConfig::plain(objective)),
             Self::Cbs(CbsConfig::improved(objective)),
+            Self::CbsId(CbsConfig::improved(objective)),
             Self::Ecbs(objective, Weight::new(3, 2)),
             Self::Pbs(objective),
             Self::Icts(objective),
@@ -64,6 +67,7 @@ impl Solver {
         let limits = Limits::expansions(budget);
         match self {
             Self::Cbs(config) => cbs_with(instance, config, limits),
+            Self::CbsId(config) => cbs_id(instance, config, limits),
             Self::Ecbs(objective, weight) => ecbs(instance, objective, weight, limits),
             Self::Pbs(objective) => pbs(instance, objective, limits),
             Self::Icts(objective) => icts(instance, objective, limits),
@@ -84,7 +88,7 @@ impl Solver {
     /// The objective the solver minimizes.
     pub fn objective(self) -> Objective {
         match self {
-            Self::Cbs(config) => config.objective,
+            Self::Cbs(config) | Self::CbsId(config) => config.objective,
             Self::MStar(config) => config.objective,
             Self::Ecbs(objective, _)
             | Self::Pbs(objective)
@@ -99,7 +103,9 @@ impl Solver {
     /// solver guarantees no quality.
     pub fn bound(self) -> Option<(u32, u32)> {
         match self {
-            Self::Cbs(_) | Self::Icts(_) | Self::MStar(_) | Self::Epea(_) => Some((1, 1)),
+            Self::Cbs(_) | Self::CbsId(_) | Self::Icts(_) | Self::MStar(_) | Self::Epea(_) => {
+                Some((1, 1))
+            }
             Self::Ecbs(_, weight) => Some((weight.numerator(), weight.denominator())),
             Self::Pbs(_) | Self::Lns2(_) | Self::Pibt(_) => None,
         }
