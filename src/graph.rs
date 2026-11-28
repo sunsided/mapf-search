@@ -92,6 +92,17 @@ impl AdjacencyList {
     }
 }
 
+/// A shared reference to a graph is the same graph, so sub-instances can borrow it.
+impl<G: Graph + ?Sized> Graph for &G {
+    fn vertex_count(&self) -> usize {
+        (**self).vertex_count()
+    }
+
+    fn neighbors(&self, vertex: Vertex, emit: impl FnMut(Vertex)) {
+        (**self).neighbors(vertex, emit);
+    }
+}
+
 impl Graph for AdjacencyList {
     fn vertex_count(&self) -> usize {
         self.adjacency.len()

@@ -149,6 +149,7 @@ proptest! {
         let objective = if makespan { Objective::Makespan } else { Objective::SumOfCosts };
         let optimal = [
             Solver::Cbs(CbsConfig::improved(objective)),
+            Solver::CbsId(CbsConfig::improved(objective)),
             Solver::Icts(objective),
             Solver::MStar(MStarConfig::basic(objective)),
             Solver::MStar(MStarConfig::recursive(objective)),
@@ -180,6 +181,7 @@ proptest! {
         let objective = if makespan { Objective::Makespan } else { Objective::SumOfCosts };
         let optimal = [
             Solver::Cbs(CbsConfig::improved(objective)),
+            Solver::CbsId(CbsConfig::improved(objective)),
             Solver::MStar(MStarConfig::recursive(objective)),
             Solver::MStar(MStarConfig::od_recursive(objective)),
         ];

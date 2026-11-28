@@ -6,8 +6,8 @@ use std::hint::black_box;
 use criterion::Criterion;
 use mapf_search::{
     AdppConfig, Agent, CbsConfig, Grid, Instance, Limits, Lns2Config, MStarConfig, MapfResult,
-    Objective, TaskAgent, TaskInstance, UaInstance, Weight, WhcaConfig, adpp, ca_star, cbs_ta,
-    cbs_with, ecbs, epea, focbs, icts, lns2, mstar_with, pbs, pibt, pibt_turns, rendezvous,
+    Objective, TaskAgent, TaskInstance, UaInstance, Weight, WhcaConfig, adpp, ca_star, cbs_id,
+    cbs_ta, cbs_with, ecbs, epea, focbs, icts, lns2, mstar_with, pbs, pibt, pibt_turns, rendezvous,
     whca_star,
 };
 
@@ -61,6 +61,21 @@ fn crowded() -> Instance<Grid> {
         .collect();
 
     Instance::new(Grid::new(8, 8), agents).expect("valid")
+}
+
+/// Benchmarks CBS with independence detection on `instance`, and with the `parallel`
+/// feature its parallel form on four threads.
+fn bench_independence(c: &mut Criterion, instance: &Instance<Grid>) {
+    let config = CbsConfig::improved(Objective::SumOfCosts);
+    let limits = Limits::expansions(100_000);
+    let solve = || cbs_id(instance, config, limits);
+    assert!(solve().solution().is_some(), "cbs_id solves the benchmark");
+    c.bench_function("cbs_id", |b| b.iter(|| black_box(solve())));
+
+    #[cfg(feature = "parallel")]
+    c.bench_function("cbs_id_par 4 threads", |b| {
+        b.iter(|| black_box(mapf_search::cbs_id_par(instance, config, limits, 4)));
+    });
 }
 
 /// Benchmarks PIBT*_T on `instance`, every agent facing east at the start.
@@ -182,6 +197,7 @@ fn main() {
     bench_focbs(&mut c, &idle);
 
     bench_turns(&mut c, &instance);
+    bench_independence(&mut c, &instance);
     bench_cooperative(&mut c, &instance, &crowded);
 
     c.final_summary();

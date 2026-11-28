@@ -1,6 +1,6 @@
 [package]
 name = "mapf-search"
-description = "Multi-agent pathfinding on grids and graphs: CBS with its improvements, CBS-TA, FOCBS, ECBS, ICTS, PBS, PIBT, PIBT*_T, CA*, WHCA*, ADPP, rendezvous coordination, M*, EPEA*, MAPF-LNS2 and multi-objective MO-CBS"
+description = "Multi-agent pathfinding on grids and graphs: CBS with its improvements and independence detection, CBS-TA, FOCBS, ECBS, ICTS, PBS, PIBT, PIBT*_T, CA*, WHCA*, ADPP, rendezvous coordination, M*, EPEA*, MAPF-LNS2 and multi-objective MO-CBS"
 version = "0.3.0"
 edition = "2024"
 rust-version = "1.86"
@@ -38,6 +38,9 @@ multiobjective-search = { version = "0.1.2", optional = true }
 ## Multi-objective CBS (`mo_cbs`, `mo_cbs_with`, `mo_cbs_per_agent`) over NAMOA*dr-st
 ## or BOA*-st from `multiobjective-search`, with its optional improvements.
 multi-objective = ["dep:multiobjective-search"]
+## `cbs_id_par`: independence detection that solves independent agent groups on several
+## threads, with heuristic-search's `solve_batch`. Needs `std`.
+parallel = ["heuristic-search/parallel"]
 
 [dev-dependencies]
 criterion = { version = "0.8", default-features = false }

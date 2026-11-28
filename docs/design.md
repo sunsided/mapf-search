@@ -694,6 +694,31 @@ The fuzz target runs it with headings from the input. On the benchmark's eight-a
 instance, all facing east, it takes about 0.2 ms (bench profile, noisy machine), against
 about 56 µs for PIBT without turns.
 
+## Independence detection (Standley 2010)
+
+`cbs_id(instance, config, limits)`: simple independence detection over CBS. Every agent
+starts in a group of its own. Each round solves the new groups with `cbs_with` on a
+sub-instance that borrows the graph (`impl Graph for &G`), writes their paths into the
+joint plan, and runs `conflicts` on it. Every pair of groups joined by a conflict merges
+in the same round (union-find); only merged groups are new and solved again. No conflict
+left: solved.
+
+- **Optimality.** Restricting an optimal plan of all agents to a group gives a plan of
+  the group, so each group's optimum is at most its share of the overall optimum, as a
+  sum (sum of costs) or a maximum (makespan). The final groups do not conflict, so their
+  plans together reach that bound. An unsolvable group makes the instance unsolvable.
+- **Limits.** `limits` bound each CBS run on its own; `Stats` add up over runs. A group
+  hitting its limits ends the run as `LimitReached`. The budget is a `Limits` value, not
+  any `Budget`, because the parallel form needs one per group.
+- **Parallel** (`cbs_id_par(instance, config, limits, threads)`, feature `parallel`,
+  which turns on heuristic-search's `parallel` and links `std`). The groups of a round
+  share nothing, so heuristic-search's `solve_batch` solves them on up to `threads`
+  threads and returns the results in order. The result, statistics included, equals
+  `cbs_id`'s; a property test checks that for 1 to 4 threads. Rounds stay sequential:
+  merging needs every group's paths.
+- Merging only conflicting groups is Standley's simple ID; his full ID first tries to
+  replan one group around the other's paths before merging, which is not done here.
+
 ## ICTS (Sharon et al. 2013)
 
 `icts(instance, objective, budget)`: the high level visits cost vectors in order of their sum

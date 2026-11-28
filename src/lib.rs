@@ -23,6 +23,10 @@
 //! - [`ecbs()`]: enhanced CBS, bounded-suboptimal within a [`Weight`] `w`, with focal search
 //!   at both levels.
 //! - [`icts()`]: increasing cost tree search with pairwise pruning, optimal.
+//! - [`cbs_id()`]: CBS with independence detection: groups of agents that do not interact
+//!   are solved as separate, smaller problems, and conflicting groups merge; optimal.
+//!   `cbs_id_par`, with the `parallel` feature, solves each round's groups on several
+//!   threads, with the same result.
 //! - [`mstar()`]: recursive M* with operator decomposition (subdimensional expansion),
 //!   optimal, and able to prove unsolvability; [`mstar_with`] and [`MStarConfig`] select
 //!   basic M*, recursive M* without operator decomposition, and OD-M*.
@@ -66,7 +70,7 @@
 //! and high-level [`Stats`]. [`Budget`], [`Limits`] and [`Stats`] are re-exported from
 //! `heuristic-search`; they bound and count the high-level expansions. [`Weight`] is too.
 //!
-//! The crate is `no_std` and needs only `alloc`.
+//! The crate is `no_std` and needs only `alloc`; the `parallel` feature needs `std`.
 //!
 //! ## Example
 //!
@@ -95,6 +99,8 @@
 #![forbid(unsafe_code)]
 
 extern crate alloc;
+#[cfg(feature = "parallel")]
+extern crate std;
 
 /// Doctests for the code examples in README.md (not part of the API).
 #[cfg(doctest)]
@@ -113,6 +119,7 @@ mod epea;
 mod flow;
 mod graph;
 mod icts;
+mod independence;
 mod instance;
 mod lns2;
 mod low_level;
@@ -143,6 +150,9 @@ pub use epea::epea;
 pub use graph::{AdjacencyList, Graph, Grid, Heading, OrientedGraph, Vertex};
 pub use heuristic_search::{Budget, Limits, Stats, Weight};
 pub use icts::icts;
+pub use independence::cbs_id;
+#[cfg(feature = "parallel")]
+pub use independence::cbs_id_par;
 pub use instance::{Agent, AgentId, Instance, InstanceError, TaskAgent, TaskInstance, UaInstance};
 pub use lns2::{Lns2Config, lns2};
 pub use low_level::space_time_astar;
