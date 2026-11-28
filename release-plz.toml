@@ -17,7 +17,11 @@ pr_branch_prefix = "release/"
 pr_name = "Release{% if package %} {{ package }}{% endif %}{% if version %} v{{ version }}{% endif %}"
 # Commits are imperative ("Add X", "Fix Y"), not Conventional Commits: map verbs to bumps.
 custom_minor_increment_regex = "^(Add|Introduce|Support|Allow|Implement|Expose)\\b"
-custom_major_increment_regex = "(?m)^BREAKING CHANGE:|^Break\\b"
+# No custom_major_increment_regex while the crate is 0.x: release-plz applies it "even for 0.x
+# versions (0.2.3 becomes 1.0.0)", so every `BREAKING CHANGE:` line would force 1.0. On 0.x a
+# break bumps the minor (0.3 -> 0.4): semver_check does that for API breaks, and the "Add ..."
+# commits of a release do it too. From 1.0 on, restore:
+#   custom_major_increment_regex = "(?m)^BREAKING CHANGE:|^Break\\b"
 # One public crate, so tags are the default "v{{ version }}".
 
 [changelog]
