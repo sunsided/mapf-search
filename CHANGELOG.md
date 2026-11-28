@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0](https://github.com/sunsided/mapf-search/compare/v0.3.0...v0.4.0) - 2026-11-28
+
+### Added
+
+- Add CBS with independence detection, in parallel behind a feature
+- Add rendezvous coordination for agents that meet to communicate
+- Add ADPP, asynchronous decentralized prioritized planning
+- Add cooperative A* and WHCA* over a reservation table
+
+### Changed
+
+- Keep BREAKING CHANGE lines from forcing 1.0 while on 0.x
+- Give the parallel independence check a budget most instances finish in
+- Switch ECBS to heuristic-search's FocalList and upgrade dependencies ([#26](https://github.com/sunsided/mapf-search/pull/26))
+- Document CBS with independence detection and the parallel feature
+- Require heuristic-search 0.4 and multiobjective-search 0.1.2
+- Require heuristic-search 0.3
+- Spell out the field order of ADPP's in-flight messages
+- Pin the WHCA* round order in a unit test
+- Move PBS's path reservations into a shared module
+- Switch the ECBS high level to heuristic-search's FocalList
+
 ## [0.3.0](https://github.com/sunsided/mapf-search/compare/v0.2.0...v0.3.0) - 2026-11-22
 
 ### Added
